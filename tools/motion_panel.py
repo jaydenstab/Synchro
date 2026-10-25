@@ -2,7 +2,7 @@
 import time
 import tkinter as tk
 from tkinter import ttk
-from desktop_theme import FONT, PANEL, MUTED, MINT, heading
+from desktop_theme import FONT, PANEL, INSET, TEXT, MUTED, MINT, WARN, DANGER, heading, wrap_labels
 
 from motion_sensor import MotionSensor
 from motion_pointer import PointerController
@@ -15,17 +15,19 @@ class MotionPanel:
         self.frame = tk.Frame(root, bg='#15181b', padx=18, pady=18)
         for column in range(3):
             self.frame.columnconfigure(column, weight=1)
-        heading(self.frame, 'Glove', 'Orientation, contacts, and cursor control').grid(row=0, column=0, columnspan=3, sticky='ew', pady=(0, 18))
+        heading(self.frame, 'Motion & pointer', 'Connect the glove, then calibrate while holding still.').grid(row=0, column=0, columnspan=3, sticky='ew', pady=(0, 18))
         self.angle_labels = []
         for i, name in enumerate(('ROLL / X', 'PITCH / Y', 'YAW / RELATIVE')):
-            tk.Label(self.frame, text=name, bg='#15181b', fg='#9aa39c',
-                     font=(FONT, 9)).grid(row=1, column=i)
-            label = tk.Label(self.frame, text='—', bg='#15181b', fg='#f3f6f4',
-                             font=(FONT, 20, 'bold'))
-            label.grid(row=2, column=i, pady=(0, 6))
+            cell = tk.Frame(self.frame, bg=INSET, padx=10, pady=10)
+            cell.grid(row=1, column=i, sticky='ew', padx=(0 if i == 0 else 4, 0))
+            tk.Label(cell, text=name, bg=INSET, fg=MUTED,
+                     font=(FONT, 9), anchor='w').pack(fill='x')
+            label = tk.Label(cell, text='—', bg=INSET, fg=MUTED,
+                             font=(FONT, 22, 'bold'), anchor='w')
+            label.pack(fill='x', pady=(5, 0))
             self.angle_labels.append(label)
         self.clicks = tk.Frame(self.frame, bg='#15181b')
-        self.clicks.grid(row=3, column=0, columnspan=3, sticky='ew')
+        self.clicks.grid(row=3, column=0, columnspan=3, sticky='ew', pady=(10, 0))
         self.contact_labels = []
         self.last_counts = [None, None]
         self.flash_until = [0.0, 0.0]
@@ -36,15 +38,15 @@ class MotionPanel:
             label.grid(row=1, column=i, padx=4, sticky='ew')
             self.contact_labels.append(label)
         self.status = tk.Label(self.frame, text='Looking for Nano USB...', bg='#15181b', fg='#9aa39c',
-                               font=(FONT, 9), wraplength=440)
-        self.status.grid(row=4, column=0, columnspan=3, pady=5)
+                               font=(FONT, 9), anchor='w', justify='left', wraplength=440)
+        self.status.grid(row=4, column=0, columnspan=3, sticky='ew', pady=(10, 8))
         self.cal_button = ttk.Button(self.frame, text='Calibrate — hold still 15 s', command=self.calibrate)
         self.cal_button.grid(row=5, column=0, columnspan=2, sticky='w')
         self.progress = ttk.Progressbar(self.frame, maximum=100)
         self.progress.grid(row=5, column=2, sticky='ew', padx=4)
         self.cal_status = tk.Label(self.frame, text='Not calibrated. Yaw can drift.', bg='#15181b',
-                                   fg='#f0b429', font=(FONT, 9), wraplength=440)
-        self.cal_status.grid(row=6, column=0, columnspan=3, pady=(5, 0))
+                                   fg='#f0b429', font=(FONT, 9), anchor='w', justify='left', wraplength=440)
+        self.cal_status.grid(row=6, column=0, columnspan=3, sticky='ew', pady=(7, 0))
         self.pointer = PointerController(self.sensor)
         self.sensor.pointer = self.pointer
         self.pointer_row = tk.Frame(self.frame, bg='#15181b')
@@ -62,16 +64,17 @@ class MotionPanel:
                         command=self.configure_pointer).pack(side='left', padx=5)
         ttk.Checkbutton(tuning, text='Reverse Y', variable=self.invert_y,
                         command=self.configure_pointer).pack(side='left', padx=5)
-        self.sensitivity_label = tk.Label(tuning, text='25 px/°', bg='#15181b', fg='#9aa39c')
+        self.sensitivity_label = tk.Label(tuning, text='Sensitivity · 25 px/°', bg='#15181b', fg='#9aa39c')
         self.sensitivity_label.pack(side='left', padx=3)
         self.pointer_speed = tk.DoubleVar(value=1.0)
         ttk.Scale(tuning, from_=0.25, to=2.0, variable=self.pointer_speed,
                   command=lambda _: self.configure_pointer(), length=85).pack(side='left')
         self.pointer_status = tk.Label(self.frame, text='Pointer off', bg='#15181b', fg='#f0b429',
-                                       font=(FONT, 9), wraplength=440)
-        self.pointer_status.grid(row=10, column=0, columnspan=3, pady=(4, 0))
+                                       font=(FONT, 9), anchor='w', justify='left', wraplength=440)
+        self.pointer_status.grid(row=10, column=0, columnspan=3, sticky='ew', pady=(7, 0))
         tk.Label(self.frame, text='Hold a contact to drag. Hold both contacts and tilt to scroll.',
                  bg=PANEL, fg=MUTED, wraplength=440, justify='left').grid(row=11, column=0, columnspan=3, sticky='w', pady=(10, 0))
+        wrap_labels(self.frame, self.status, self.cal_status, self.pointer_status)
         self.pointer_error = None
         self.error = None
         if connect:
@@ -105,7 +108,7 @@ class MotionPanel:
 
     def configure_pointer(self):
         self.pointer.configure(self.pointer_speed.get(), self.invert_x.get(), self.invert_y.get())
-        self.sensitivity_label.config(text=f'{25 * self.pointer_speed.get():.0f} px/°')
+        self.sensitivity_label.config(text=f'Sensitivity · {25 * self.pointer_speed.get():.0f} px/°')
 
     def calibrate(self):
         try:
@@ -160,13 +163,14 @@ class MotionPanel:
         if (not busy and data['fresh'] and reference_temp is not None and
                 abs(data['temperature_c'] - reference_temp) > 5):
             message += ' Temperature changed; recalibration recommended.'
-        self.cal_status.config(text=self.error or message)
+        self.cal_status.config(text=self.error or message,
+                               fg=DANGER if self.error or cal['state'] == 'failed' else WARN if busy else MUTED)
         pointer = self.pointer.snapshot()
         self.pointer_button.config(state='normal' if self.connect and pointer['available'] else 'disabled')
         self.neutral_button.config(state='normal' if self.connect and pointer['available'] else 'disabled')
         self.pointer_button.config(text='Pause pointer' if pointer['enabled'] else 'Enable pointer')
         self.pointer_status.config(text=self.pointer_error or pointer['message'],
-                                   fg='#3ddc97' if pointer['enabled'] and not pointer['suspended'] else '#f0b429')
+                                   fg=DANGER if self.pointer_error else MINT if pointer['enabled'] and not pointer['suspended'] else MUTED)
 
     def close(self):
         self.pointer.close()

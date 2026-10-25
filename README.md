@@ -29,7 +29,7 @@ For the PowerShell launcher, copy `bluetooth-camera.example.json` to
 `.local/bluetooth-camera.json` and set `bt_address`, then run
 `tools/Start-Bluetooth-Camera.ps1`. Options: `-Console`, `-MotionTransport ble`,
 `-Listen`, `-PausePointer`. The last option starts with the pointer paused and
-the Glove tab hidden; Show motion and cursor controls reveals it. The launcher prefers this project's .venv and opens the desktop window directly.
+Speech & Jarvis selected. Both main tabs stay visible. The launcher prefers this project's .venv and opens the desktop window directly.
 
 Glove calibration needs warmup and a 15-second stationary measurement. Click
 Enable pointer after calibration while holding a comfortable neutral pose. Hold

@@ -71,8 +71,8 @@ History is kept in memory until New chat or app shutdown; it is not saved to dis
 - A bare wake word times out after ten seconds without a question. A collected
   request times out after sixty seconds. Audio gaps and dropped transcripts
   cancel it rather than sending a partial request.
-- Voice-test launches pause cursor control and fold the motion panel to leave
-  room for video. **Show motion and cursor controls** reveals it. Use **Pause pointer**
+- Voice-test launches pause cursor control and select **Speech & Jarvis**.
+  The **Glove** tab stays visible beside it. Use **Pause pointer**
   to stop the pointer. Esc stops in-progress typing only; it does not stop pointer
   control, the microphone or spoken replies.
 

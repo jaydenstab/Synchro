@@ -13,7 +13,10 @@ class DesktopViewerTests(unittest.TestCase):
     def test_preview_opens_no_hardware_and_has_the_same_tabs(self):
         self.check_viewer(preview=True)
 
-    def check_viewer(self, preview):
+    def test_voice_test_launch_keeps_glove_tab_visible(self):
+        self.check_viewer(preview=True, pause_pointer=True)
+
+    def check_viewer(self, preview, pause_pointer=False):
         import tkinter as tk
         from tkinter import ttk
         from bluetooth_viewer import launch_viewer
@@ -31,20 +34,24 @@ class DesktopViewerTests(unittest.TestCase):
 
         def run_checks(root):
             try:
-                root.geometry('980x720')
                 root.update()
                 notebook = next(w for w in walk(root) if isinstance(w, ttk.Notebook))
-                for tab in notebook.tabs():
-                    notebook.select(tab)
+                if pause_pointer:
+                    self.assertEqual(notebook.tab(notebook.select(), 'text'), 'Speech & Jarvis')
+                for geometry in ('980x720', '1280x860'):
+                    root.geometry(geometry)
                     root.update()
-                    content = root.nametowidget(tab)
-                    for widget in walk(content):
-                        if isinstance(widget, (ttk.Button, ttk.Combobox, ttk.Scale, tk.Text)) and widget.winfo_ismapped():
-                            right = widget.winfo_rootx() + widget.winfo_width()
-                            bottom = widget.winfo_rooty() + widget.winfo_height()
-                            self.assertLessEqual(right, root.winfo_rootx() + root.winfo_width())
-                            self.assertLessEqual(bottom, root.winfo_rooty() + root.winfo_height())
-                    observations.append(notebook.tab(tab, 'text'))
+                    for tab in notebook.tabs():
+                        notebook.select(tab)
+                        root.update()
+                        for widget in walk(root):
+                            if isinstance(widget, (ttk.Button, ttk.Combobox, ttk.Scale, tk.Text, tk.Label)) and widget.winfo_ismapped():
+                                right = widget.winfo_rootx() + widget.winfo_width()
+                                bottom = widget.winfo_rooty() + widget.winfo_height()
+                                self.assertGreaterEqual(widget.winfo_rootx(), root.winfo_rootx(), str(widget))
+                                self.assertLessEqual(right, root.winfo_rootx() + root.winfo_width(), str(widget))
+                                self.assertLessEqual(bottom, root.winfo_rooty() + root.winfo_height(), str(widget))
+                observations.extend(notebook.tab(tab, 'text') for tab in notebook.tabs())
                 # Both transcript/conversation views and every screenshot control must survive the redesign.
                 inner = next(w for w in walk(root) if isinstance(w, ttk.Notebook) and w is not notebook)
                 self.assertEqual([inner.tab(t, 'text') for t in inner.tabs()], ['Live transcript', 'Jarvis conversation'])
@@ -54,12 +61,13 @@ class DesktopViewerTests(unittest.TestCase):
                     self.assertGreater(root.nametowidget(tab).winfo_height(), 60)
                 checks = {w.cget('text'): w for w in walk(root) if isinstance(w, ttk.Checkbutton)}
                 for name in ('Listen for Jarvis', 'Read aloud', 'Type writing requests',
-                             'Noise suppression · RNNoise', 'Show motion and cursor controls', 'Rotate 180°'):
+                             'Noise suppression · RNNoise', 'Rotate 180°'):
                     self.assertIn(name, checks)
-                checks['Show motion and cursor controls'].invoke()
-                self.assertEqual(notebook.tab(notebook.tabs()[0], 'state'), 'hidden')
-                checks['Show motion and cursor controls'].invoke()
-                self.assertEqual(notebook.tab(notebook.tabs()[0], 'state'), 'normal')
+                self.assertNotIn('Show motion and cursor controls', checks)
+                for tab in notebook.tabs():
+                    self.assertEqual(notebook.tab(tab, 'state'), 'normal')
+                # The transcript now uses the themed ttk scrollbar, not a bright native Tk scrollbar.
+                self.assertFalse(any(w.winfo_class() == 'Scrollbar' for w in walk(root)))
                 buttons = {w.cget('text'): w for w in walk(root) if isinstance(w, ttk.Button)}
                 self.assertEqual(str(buttons['Save photo'].cget('state')), 'disabled')
                 self.assertEqual(str(buttons['Start camera'].cget('state')), 'disabled')
@@ -103,7 +111,7 @@ class DesktopViewerTests(unittest.TestCase):
              patch('jarvis_assistant.GeminiVision.ask') as ask, \
              patch('jarvis_assistant.WindowsSpeech.speak') as speak, \
              patch('text_writer.WindowsTextWriter.write') as write:
-            launch_viewer('00:00:00:00:00:00', 1, 15, preview=preview)
+            launch_viewer('00:00:00:00:00:00', 1, 15, preview=preview, pause_pointer=pause_pointer)
             if preview:
                 camera_connect.assert_not_called()
                 sensor_start.assert_not_called()

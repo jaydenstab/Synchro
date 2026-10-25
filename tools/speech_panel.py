@@ -1,8 +1,7 @@
 """Visible mic controls and rolling transcript; all widgets stay on the Tk thread."""
 import tkinter as tk
 from tkinter import ttk
-from desktop_theme import FONT, PANEL, MUTED, MINT, heading
-from tkinter.scrolledtext import ScrolledText
+from desktop_theme import FONT, PANEL, MUTED, MINT, DANGER, heading, TextPane, wrap_labels
 
 from speech_stream import SpeechController
 from jarvis_assistant import READY_MESSAGE
@@ -27,7 +26,7 @@ class SpeechPanel:
         self.controller.assistant = None if preview else assistant
         self.frame = tk.Frame(root, bg='#15181b', padx=18, pady=18)
         self.frame.columnconfigure(1, weight=1)
-        heading(self.frame, 'Speech & Jarvis', 'Local transcription · Voice and camera assistant').grid(row=0, column=0, columnspan=5, sticky='ew', pady=(0, 14))
+        heading(self.frame, 'Microphone', 'Local transcription · Jarvis uses Gemini').grid(row=0, column=0, columnspan=5, sticky='ew', pady=(0, 14))
         self.frame.rowconfigure(5, weight=1)
         self.button = ttk.Button(self.frame, text='Start mic', command=self.toggle, style='Primary.TButton')
         self.button.grid(row=2, column=0, sticky='w', pady=(8, 0))
@@ -47,7 +46,7 @@ class SpeechPanel:
             self.devices = [item[0] for item in options]
             self.device['values'] = [item[1] for item in options]
         except Exception:
-            self.device['values'] = ['UI preview · Microphone disabled' if preview else 'Microphone unavailable — install speech dependencies']
+            self.device['values'] = ['Default laptop microphone' if preview else 'Microphone unavailable — install speech dependencies']
         self.device.current(0)
         ttk.Button(self.frame, text='Clear text', command=self.controller.clear).grid(row=2, column=1, sticky='w', padx=8, pady=(8, 0))
         self.level = ttk.Progressbar(self.frame, maximum=100, length=65)
@@ -60,16 +59,12 @@ class SpeechPanel:
         self.status.grid(row=4, column=0, columnspan=5, sticky='ew', pady=(4, 10))
         self.tabs = ttk.Notebook(self.frame)
         self.tabs.grid(row=5, column=0, columnspan=5, sticky='nsew')
-        self.text = ScrolledText(self.tabs, width=36, height=5, wrap='word', font=(FONT, 11),
-                                 bg='#101214', fg='#f3f6f4', insertbackground='#f3f6f4',
-                                 selectbackground='#285d46', selectforeground='#f3f6f4',
-                                 relief='flat', state='disabled', padx=10, pady=10)
-        self.tabs.add(self.text, text='Live transcript')
-        self.reply = ScrolledText(self.tabs, width=36, height=5, wrap='word', font=(FONT, 11),
-                                 bg='#101214', fg='#f3f6f4', insertbackground='#f3f6f4',
-                                 selectbackground='#285d46', selectforeground='#f3f6f4',
-                                 relief='flat', state='disabled', padx=10, pady=10)
-        self.tabs.add(self.reply, text='Jarvis conversation')
+        transcript_pane = TextPane(self.tabs)
+        reply_pane = TextPane(self.tabs)
+        self.text = transcript_pane.text
+        self.reply = reply_pane.text
+        self.tabs.add(transcript_pane, text='Live transcript')
+        self.tabs.add(reply_pane, text='Jarvis conversation')
         self.jarvis_revision = -1
         self.jarvis_results = 0
         self.jarvis_enabled = tk.BooleanVar(value=True)
@@ -93,8 +88,9 @@ class SpeechPanel:
         self.jarvis_status = tk.Label(self.frame, bg='#15181b', fg='#3ddc97', font=(FONT, 9),
                                       anchor='w', wraplength=440)
         self.jarvis_status.grid(row=8, column=0, columnspan=5, sticky='ew', pady=(3, 0))
+        wrap_labels(self.frame, self.status, self.jarvis_status)
         if assistant is not None:
-            self.tabs.select(self.reply)
+            self.tabs.select(self.reply.master)
         self.revision = -1
         self.error = None
         if listen and not preview:
@@ -136,7 +132,7 @@ class SpeechPanel:
             detail += f" · last decode {data['latency_ms'] / 1000:.1f}s"
         if data['dropped']:
             detail += f" · {data['dropped']} skipped clips"
-        self.status.config(text=detail, fg='#3ddc97' if active and not data['error'] else '#f0b429')
+        self.status.config(text=detail, fg=DANGER if self.error or data['error'] else MINT if active else MUTED)
         if data['revision'] != self.revision:
             self.revision = data['revision']
             self.text.config(state='normal')
@@ -148,20 +144,22 @@ class SpeechPanel:
             jarvis = self.assistant.snapshot()
             status = jarvis['error'] or jarvis['status']
             if self.preview:
-                status = 'UI preview · Jarvis requests, playback, and typing are disabled.'
+                status = 'Say “Jarvis”, then ask a question when the microphone is on.'
             elif not active:
                 status = 'Start mic, then say “Jarvis” followed by your question.'
-            self.jarvis_status.config(text=status, fg='#f0b429' if jarvis['error'] else '#3ddc97')
+            self.jarvis_status.config(text=status, fg=DANGER if jarvis['error'] else MINT if active and jarvis['phase'] != 'waiting' else MUTED)
             if jarvis['revision'] != self.jarvis_revision:
                 self.jarvis_revision = jarvis['revision']
                 content = conversation_text(jarvis)
+                if content == READY_MESSAGE:
+                    content = 'What would you like to know?\n\nSay “Jarvis”, then ask your question. Replies and writing requests appear here.'
                 self.reply.config(state='normal')
                 self.reply.delete('1.0', 'end')
                 self.reply.insert('end', content)
                 self.reply.see('end')
                 self.reply.config(state='disabled')
                 if jarvis['results'] > self.jarvis_results or jarvis['phase'] == 'collecting':
-                    self.tabs.select(self.reply)
+                    self.tabs.select(self.reply.master)
                 self.jarvis_results = jarvis['results']
 
     def configure_jarvis(self):
