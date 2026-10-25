@@ -5,6 +5,16 @@ project context rather than the entire chat. It excludes personal conversation,
 credentials and private captured media. For current behavior and wiring, this
 handoff and MOTION.md take precedence over older bring-up notes in firmware/README.md.
 
+Latest addition: **Jarvis voice + vision assistant**, documented in
+firmware/JARVIS.md. After “Jarvis”, once the transcript ends in `.`, `?` or `!`, the app sends the
+recognized request text and one fresh camera frame to Gemini 3.5 Flash-Lite,
+shows the answer and speaks it with Windows TTS. Its key is encrypted locally
+and excluded from Git/share packages. A receiving computer needs its own key.
+Jarvis also writes into the selected text box on explicit writing commands, with
+verbatim recognized text for “write exactly”. All questions and answers share
+one in-memory conversation until New chat or app shutdown. The full test suite
+passes, and real Gemini writing plus a follow-up memory check passed.
+
 ## Purpose and design choices
 
 A wearable glove provides hand motion and conductive finger contacts for a
@@ -36,7 +46,7 @@ USB-A output socket have been soldered on.
 | Battery | PKCELL LP803860, 3.7 V nominal, 2000 mAh LiPo |
 | Current microphone | Laptop microphone array, not a glove-mounted microphone |
 | Power cable | PowerBoost USB-A output to Nano USB-C |
-| Computer | Windows for the full app; Mac camera-only prototype included |
+| Computer | Windows app; Mac development preview via --preview |
 
 Disconnect power before rewiring. These are printed pin labels, not physical
 pin positions or raw ESP32 GPIO numbers.
@@ -84,7 +94,7 @@ Use the PowerBoost micro-USB input for charging and charge off the body.
 ## Software architecture and implemented behavior
 
 Firmware is Arduino C++. The full desktop app and processing are Python.
-The separate native Mac camera prototype is Swift.
+The earlier native Mac camera prototype has been removed. Use --preview on the Windows viewer for Mac interface development.
 
 - **NanoMotionAngles** samples all six MPU axes at 1 kHz using the FIFO,
   400 kHz I2C, ±4 g acceleration and ±500 degrees/s gyro range. It debounces
@@ -95,9 +105,11 @@ The separate native Mac camera prototype is Swift.
   Roll/pitch use gravity; yaw has no magnetometer reference and drifts.
 - **motion_sensor.py** owns the sensor transport and local calibration.
   **motion_panel.py** shows roll/pitch/yaw, contact states, counts and controls.
-- **motion_pointer.py** injects Windows mouse movement and paired click events.
-  Thumb/index clicks left; thumb/middle clicks right. Holding a contact does
-  not drag or repeatedly click. Esc stops both movement and clicks.
+- **motion_pointer.py** injects Windows mouse movement, held buttons and wheel events.
+  Thumb/index holds left; thumb/middle holds right. Hold to drag, release to let go.
+  Both contacts together use pitch changes to scroll while the pointer stays still.
+  Release both to resume pointing. Pause pointer releases buttons and stops
+  movement/scrolling; Esc does not affect pointer control.
 - **SynchroCamBluetooth** sends JPEG frames over Bluetooth Classic RFCOMM.
   **bluetooth_viewer.py** requests one frame at a time, displays it, and rotates
   it 180 degrees by default. This is a custom camera app, not an OS webcam.
@@ -106,41 +118,40 @@ The separate native Mac camera prototype is Swift.
   A ~512 ms pause ends an utterance, then text appears in **speech_panel.py**.
   The active path no longer uses Groq or Whisper. The earlier user spelling
   “b2” was interpreted as model version “v2”.
-- **speech_secrets.py** is a retained historical credential utility and has
-  tests, but the current speech pipeline does not import or use its saved key.
+- **speech_secrets.py** retains the historical Groq credential utility. Its
+  DPAPI helper is reused by **gemini_secrets.py**, but the old Groq key is unused.
+  **jarvis_assistant.py** owns wake requests, fresh snapshots, Gemini and TTS.
 
-Speech currently displays text in the viewer only. Automatically typing dictated
-text into the focused app was discussed earlier but is not implemented.
+Speech displays recognized text in the viewer; Jarvis also displays/speaks its
+answer. Explicit write/type/draft/compose requests insert generated writing into
+the focused editable field, using tools/text_writer.py. “Write exactly” inserts
+the recognized payload without an LLM rewrite. Current-field checks prevent typing
+after switching focus; New chat clears the shared conversation. See JARVIS.md.
 A glove-mounted microphone is still a future hardware choice; none is installed.
 
 ## Current cursor design and limitations
 
-Earlier versions mapped roll and pitch to cursor velocity, then to direct screen
-position. The latest request changed horizontal control to **sliding the whole
-hand sideways**, explicitly choosing an MPU-only approximation rather than
-webcam tracking. The current default is therefore:
+The owner requested restoring the cursor code from before the sideways hand
+movement experiment. The controller, panel and pointer tests were recovered
+from that earlier edit history.
 
-- X: estimated short-swipe translation, using the selected board X or Y axis
-  projected horizontally at the captured neutral pose.
-- Y: pitch mapped to a screen position (default 25 pixels/degree).
-- Auto cursor: enabled by default, captures neutral after connection and a brief
-  stable pose when valid calibration is available.
-- Stabilize: two-stage smoothing, 2-pixel hysteresis, faster large movements and
-  a 120 ms cursor freeze around finger presses.
-- Esc/manual pause: latched off across reconnects until explicitly re-enabled.
-- Set neutral: captures a new neutral and translation reference.
+- X: roll mapped to horizontal screen position; Y: pitch to vertical position.
+- Both axes default to 25 pixels/degree after a 0.5-degree dead zone.
+  Holding a tilt holds the target position; sensitivity scales both axes.
+- Enable pointer: captures neutral and starts control manually.
+- Set neutral: captures the current tilt as neutral at screen center.
+- Pause pointer: releases held buttons and stops movement/scrolling until enabled.
+- Esc does not stop movement, dragging or scrolling.
+- Hold one contact to drag; hold both and tilt up/down to scroll. Release both to
+  jump to the current tilt's pointer position with the original neutral and screen
+  anchor preserved. Quick single-contact taps still click.
+- The earlier orientation filter and brief-interruption recovery remain.
 
-A lone MPU6050 cannot track accurate absolute hand translation. Gravity removal,
-bias learning, velocity leakage and resetting velocity at rest are heuristics.
-Slow/constant-speed motion can be missed; rotation or bias can look like
-translation; returning to the same hand location need not return to the same
-pixel. This is explicitly experimental, not a validated precision mouse or
-medical tremor treatment. Its software tests pass, but the new physical swipe
-behavior has not yet been tested on the glove.
-
-The most recent owner instruction was **test speech only for now**. Cursor
-control was manually paused in the running session. That runtime pause does not
-persist in a fresh launch: press Esc or Pause auto for a new speech-only session.
+The sideways cursor, auto-activation, extra cursor smoothing and pinch freeze
+introduced with the experiment are removed. Translation helpers remain in the
+source but do not affect the cursor. Final mounting and sensitivity need a
+physical user trial. Jarvis writing/conversation and held-button/scroll gestures
+were added after this cursor restoration; the camera firmware is unchanged.
 
 ## Known devices and connection details
 
@@ -238,25 +249,32 @@ Observed on the owner's Windows laptop:
 - USB and BLE motion, stationary calibration, and individual copper contact
   states passed earlier live checks.
 - Previous tilt-position mouse and left/right clicks were exercised.
-- New swipe translation/auto-connect/stabilization pass simulated tests but
-  physical tuning is pending because the glove was disconnected.
-- The full automated suite passed **84 tests** before packaging.
+- Current tilt positioning, held-button dragging, two-finger scrolling, release
+  positioning and Esc behavior pass simulated regressions. The earlier sideways
+  translation/auto-activation experiment is no longer used by the pointer.
+- The current automated suite passed **140 tests** before the GitHub update.
 - Real local Parakeet + Silero recognized a synthetic two-sentence fixture;
   decode times were 0.112 and 0.106 s after pause detection.
 - The subsequent live laptop microphone session reached **34 successful
   transcriptions, zero reported errors/skipped clips**, with the latest decode
   about 109 ms. Recognition accuracy still depends on speech and noise.
-- At the last check, the camera and glove were disconnected; the speech panel
-  continued working. A disconnected-camera warning is expected in that state.
-- A Mac camera-only source prototype is included, but it has not been built
-  or tested on a Mac. Full motion/cursor/speech UI on macOS is not implemented.
+- A live dictation command inserted 12 characters into Notepad, confirmed in the
+  app status, visible document and user response. Recognition accuracy still
+  depends on speech and background noise; generated writing and follow-up
+  conversation context also passed a real Gemini API check.
+- USB and subsequent battery-powered BLE motion were verified at about 1,002
+  samples/s with no packet/I2C errors or BLE queue drops during the check.
+  Launch with `--motion-transport auto` to select USB when present and fall back
+  to BLE. Camera Bluetooth video remained available in the viewer.
+- The product targets Windows. Mac is a development host only; --preview opens
+  the real interface without hardware, cloud requests, playback, or text insertion.
 - Battery runtime, simultaneous load margin, final wearable mounting, long-term
-  drift and physical swipe consistency have not been fully characterized.
+  drift and physical pointing consistency have not been fully characterized.
 
 Useful next steps: test the friend's mic setup; transfer one Bluetooth connection
-at a time; calibrate on that computer; test short sideways hand movements with
-axis/reverse/sensitivity controls; decide whether the approximation is adequate;
-then choose a glove microphone and implement dictation-to-active-app if desired.
+at a time; calibrate on that computer; set a comfortable neutral pose and tune
+tilt sensitivity / axis reversal; then choose a glove microphone and test writing
+in the friend's target app.
 
 ## File and history notes
 
@@ -270,9 +288,8 @@ is not implemented or show UART wires retained. The current implementation and
 runtime connections are described above. Old .local evidence paths are references
 to private test files on the owner's machine and are not expected in this ZIP.
 
-The Mac README refers to PAIRING.txt from an earlier private partner package.
-That file is deliberately absent here; obtain the PIN separately. Do not run
-package_mac_camera.py expecting it to work without a local secrets.h.
+The earlier Mac viewer and packaging helper have been removed. See the root
+README for the Windows app and Mac development-preview commands.
 
 Private API keys (including the previous Groq key), Bluetooth/Wi-Fi secrets,
 encrypted credentials, recorded media, private logs, calibration data, control

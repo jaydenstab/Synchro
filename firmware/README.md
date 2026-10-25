@@ -261,47 +261,8 @@ This is a viewer-only change; camera firmware and raw probe JPEGs are unchanged.
 The updated Windows GUI was verified receiving the real 640x480 Bluetooth feed,
 and all seven existing camera protocol tests passed.
 
-For a nearby Mac, `tools/mac-camera/` contains a separate native AppKit /
-IOBluetooth viewer, a local build launcher, and setup instructions. It needs
-macOS 12+ and Apple's Command Line Tools or Xcode. The source was checked
-against Apple's APIs but has not been compiled or hardware-tested on a Mac.
-Run `tools/package_mac_camera.py` with Python to create the private local
-handoff ZIP at `.local/partner/Synchro-Camera-Mac.zip`; its pairing PIN is
-read from the ignored firmware secret and included only in `PAIRING.txt`
-inside that ignored ZIP. Close or stop the Windows viewer before connecting
-from the Mac. Only one viewer should use the camera at a time.
-
-For a hardware test, run the viewer with `--probe 12`. It validates and
-decodes every image, saves first/last JPEGs and a timing report under
-`.local/bluetooth-test`, and exits. `tools/test_bluetooth_viewer.py` checks
-fragmented/combined packets and rejected malformed/truncated responses.
-The GUI requests one image at a time, shows a short rolling fps average,
-keeps at most one pending image, and reconnects on a link failure.
-
-The boards still require power. Keep the current USB power wiring during
-these tests. Before switching the camera to an external 5V booster, remove
-the Nano VBUS-to-camera-5V wire and retain common ground. Do not tie the
-booster's 5V output to the laptop's USB 5V supply.
-
-The working Wi-Fi v2 source and build files are preserved under
-`.local/camera-wifi-v2-baseline`; the original full-flash backup remains
-under `backups/`. Bluetooth performance must be measured on the real link;
-compilation and protocol unit tests alone do not establish throughput.
-
-Verified on 2026-10-24 with Bluetooth firmware v1 (320×240): the camera paired with Windows at Bluetooth address
-`70:4B:CA:46:52:22`, RFCOMM channel 1. A 12-frame hardware probe decoded all
-12 JPEGs at 19.68 fps (about 2.45 kB per image). The open laptop viewer,
-which limits requests to 15 fps, showed approximately 12–13 fps while the
-scene changed. These are observed results, not guaranteed rates. See
-`.local/bluetooth-test/report.json` for the probe timings.
-
-The 640×480 Bluetooth v2 upgrade was also verified on 2026-10-24: all
-60 hardware-test JPEGs decoded successfully in 10.22 seconds (5.87 fps).
-They were 11.4–12.5 kB each in that scene. The reopened viewer displayed
-640×480 and approximately 6.2 fps during visual inspection. Results are in
-`.local/bluetooth-vga-test/report.json`, with first/last test images. Its
-seven protocol tests pass, including both resolutions and mismatched
-JPEG/header dimensions. Bluetooth pairing remained intact after upload.
+The supported desktop viewer is the Windows app in `tools/bluetooth_viewer.py`.
+Use `--preview` for interface development on another operating system.
 
 ## Earlier USB-powered motion bring-up (reference only)
 

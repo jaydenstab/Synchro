@@ -47,6 +47,7 @@ class MotionSensor:
                       'last_orientation_reset': None, 'range_exceeded': False, 'clipped_samples': 0}
         self.pointer = None
         self.speech = None
+        self.assistant = None
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.filter = Orientation()
         self.translation = InertialTranslation()
@@ -71,6 +72,8 @@ class MotionSensor:
             result['pointer'] = self.pointer.snapshot()
         if self.speech is not None:
             result['speech'] = self.speech.snapshot(include_text=False)
+        if self.assistant is not None:
+            result['assistant'] = self.assistant.snapshot(include_text=False)
         return result
 
     def _reset_orientation(self, reason='Tracking reset'):

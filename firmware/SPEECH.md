@@ -5,11 +5,32 @@ to detect a pause, then transcribes that utterance with **Parakeet TDT 0.6B v2**
 Text appears in the speech panel after each pause. This is English transcription
 on this laptop, independent of the glove and camera Bluetooth connections.
 
+The viewer also supports [Jarvis](JARVIS.md): after the wake word, terminating
+punctuation (`.`, `?`, `!`) sends the collected transcript and current camera image to Gemini and
+plays its response. The 512 ms boundaries below are local transcription chunks;
+they do not independently trigger cloud requests.
+
 Click **Start mic** to listen or **Stop mic** to release the microphone. A visible
 **MIC ON** indicator, input selector and level meter show what is active.
+**Noise suppression** is enabled by default and runs RNNoise locally before
+both Silero and Parakeet. The status shows **RNNoise on** only once the filter
+has loaded. Stop the mic to change the input or toggle suppression. For AirPods,
+select **Headset (Justin’s AirPods Pro) · Windows WASAPI** when connected, then
+click **Start mic**. The selection applies to the current viewer session.
+
+RNNoise reduces background noise; it does not isolate one speaker from other
+people speaking. Its native library is supplied by the pinned `pyrnnoise`
+package. Stateful FIR conversion handles 16 → 48 → 16 kHz, preserving sample
+counts with a 10 ms frame reserve and 2 ms resampling delay, plus RNNoise's
+internal delay. The filter runs on the capture worker, outside the audio
+callback. Clear, audio gaps, and Jarvis playback mute reset its buffered audio
+and recurrent state. Stopping capture releases its native state. If RNNoise
+cannot load, the mic stays off with a visible message; suppression can be
+unchecked to use the unfiltered input.
+
 **Clear text** clears the transcript and discards older queued/in-flight results.
-Closing the viewer stops capture. **Esc** pauses the glove pointer; it does not
-stop the microphone. A normal launch starts with the mic off; use `-Listen` to
+Closing the viewer stops capture. **Pause pointer** pauses the glove pointer;
+Esc does not stop the pointer or microphone. A normal launch starts with the mic off; use `-Listen` to
 start listening immediately:
 
 ```powershell
@@ -31,7 +52,11 @@ Model downloads happen once (about 664 MB total) into the Hugging Face cache.
 Subsequent loads read the cache first, including when offline. Both model
 revisions are pinned in `tools/speech_models.py`. The application does not read
 the old Groq API key or call Groq. Audio and transcripts stay in memory on the
-laptop; the transcription box holds up to 16,000 characters.
+laptop; the transcription box holds up to 16,000 characters. When Jarvis is
+enabled, the activated request text, previous conversation text and a fresh camera
+JPEG are also sent to Gemini. Explicit writing requests can insert the response
+into the selected text box; “write exactly” uses the recognized text locally.
+See JARVIS.md for its separate encrypted key and transmission controls.
 
 ## Pause detection
 
@@ -65,10 +90,19 @@ measurements, not guaranteed latency or accuracy for every speaker/environment.
 
 Automated regressions cover pause-only segmentation, silence, hysteresis,
 long-utterance limits, local PCM normalization, recurrent VAD state, and
-discarding results after Stop/Clear or during model loading. The full project
-suite currently passes 84 tests.
+discarding results after Stop/Clear or during model loading. Noise suppression
+regressions additionally cover stream continuity, resampling gain and delay,
+bounded buffers, PCM clipping, native noise attenuation, reset, bypass, missing
+dependencies, and feeding the same cleaned audio to VAD and transcription.
+
+On this laptop, an 8.768-second synthetic speech-plus-noise check took 1.33 ms
+on average per 32 ms frame (99th percentile 2.38 ms). Silero and Parakeet
+correctly transcribed both test sentences after suppression. These synthetic
+results do not measure the quality of a live AirPods recording.
 
 Sources and attribution:
+[RNNoise](https://github.com/xiph/rnnoise),
+[pyrnnoise](https://github.com/pengzhendong/pyrnnoise),
 [NVIDIA Parakeet TDT 0.6B v2, CC-BY-4.0](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2),
 [ONNX conversion](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx),
 [Silero VAD](https://github.com/snakers4/silero-vad),

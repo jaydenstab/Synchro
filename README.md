@@ -1,93 +1,120 @@
-# Synchro — start here
+# Synchro for Windows
 
-This is the complete shareable source project for the glove demo, packaged on
-**25 October 2026**. Read [HANDOFF.md](HANDOFF.md) for the project context, hardware
-wiring, current status and next steps.
+Synchro is a native Windows desktop app built on the working Tk viewer from the
+`test` branch. Firmware, wiring, USB/BLE motion, pointer control, and local speech
+live in `firmware/`, `hardware/`, and `tools/`. Mac is a development host; the
+separate native Mac app and its helper have been removed.
 
-The glove firmware, motion processing, pointer, and local speech are unchanged.
-The app window is the React UI in `frontend/`, on both Windows and Mac.
-`tools/bluetooth_viewer.py` remains the Bluetooth camera protocol and the original Tk test viewer.
+## Windows
 
-## Run
-
-Install **64-bit Python 3.12** and Node.js. Enable Bluetooth. On Windows, pair **Synchro-Cam-BT** first.
+Install 64-bit Python 3.12 with Tcl/Tk and enable Bluetooth. From this folder:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-web.txt
-cd frontend
-npm install
-npm run build
-cd ..
-.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe tools\bluetooth_viewer.py --address 70:4B:CA:46:52:22 --motion-transport ble
 ```
+
+Replace the address for another camera. Pair Synchro-Cam-BT in Windows first;
+get its PIN from the project owner. Only one computer can use the camera at a
+time. The glove advertises separately as Synchro-Glove.
+
+The camera preview sits beside Glove and Speech & Jarvis tabs. Drag the divider to resize.
+Start/Stop affects the camera; glove and speech work independently. Use
+Pause pointer to stop cursor movement, held buttons, and scrolling. Esc only
+stops in-progress Jarvis typing; it does not stop the pointer. The header shows microphone activity on both tabs.
+Save photo writes to `.local/bluetooth-photos/` with the chosen rotation.
+
+For the PowerShell launcher, copy `bluetooth-camera.example.json` to
+`.local/bluetooth-camera.json` and set `bt_address`, then run
+`tools/Start-Bluetooth-Camera.ps1`. Options: `-Console`, `-MotionTransport ble`,
+`-Listen`, `-PausePointer`. The last option starts with the pointer paused and
+the Glove tab hidden; Show motion and cursor controls reveals it. The launcher prefers this project's .venv and opens the desktop window directly.
+
+Glove calibration needs warmup and a 15-second stationary measurement. Click
+Enable pointer after calibration while holding a comfortable neutral pose. Hold
+thumb/index for left drag or thumb/middle for right drag; release to let go.
+Hold both contacts and tilt up/down to scroll. Sensitivity is shown in pixels per
+degree. Cursor injection and text insertion use the existing Windows implementation.
+
+Speech uses local Parakeet/Silero models with optional RNNoise suppression.
+The first microphone start downloads approximately 664 MB of model weights;
+later starts use the cache. Local transcription needs no API key. Allow microphone
+access when prompted, then speak and pause to see the Live transcript.
+Change Noise suppression before starting the microphone.
+
+## Jarvis
+
+The Speech & Jarvis tab keeps both Live transcript and Jarvis conversation views.
+Listen for Jarvis, Read aloud, Type writing requests, Stop reply, and New chat
+retain the implementations from the latest test branch. Say “Jarvis” followed by
+a question; terminal punctuation in the recognized transcript submits it.
+
+Jarvis camera questions use a fresh, rotation-corrected camera frame and the Gemini
+API. Configure your own key on Windows with
+`.\.venv\Scripts\python.exe tools\gemini_secrets.py`, or set `GEMINI_API_KEY`.
+Core camera, glove, and local transcription work without a cloud account.
+See [firmware/JARVIS.md](firmware/JARVIS.md) for exact behavior and credential setup.
+
+Conversation context lasts until New chat or app shutdown. Read aloud uses the
+Windows voice. Explicit write/type requests can insert text into a selected
+writable field; ordinary answers are not typed. The Type writing requests checkbox
+controls insertion. Stop reply cancels a pending reply. These native assistant
+features do not depend on a web interface or local FastAPI server.
+
+## Preview while developing on a Mac
+
+Install Python with working Tcl/Tk support and the project dependencies:
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-web.txt
-cd frontend && npm install && npm run build && cd ..
-python -m uvicorn app:app --host 127.0.0.1 --port 8000
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python tools/bluetooth_viewer.py --preview
 ```
 
-Open http://127.0.0.1:8000. On a Mac, the camera radio stays in `camera/synchro_mac` (`bash camera/synchro_mac/Start-Mac.command`, then Start). On Windows, this process opens the camera and the glove.
+This opens the actual Windows viewer widgets, layouts, and tabs on your Mac.
+The title and connection status identify it as a UI preview. No camera, glove,
+microphone, pointer, cloud, playback, or typing operations are started. Hardware controls are disabled;
+readings stay empty. No test feed is injected. No camera address is required.
+`--preview` cannot be combined with `--listen` or `--probe`.
 
-`tools/Start-Bluetooth-Camera.ps1` starts that same page. `-MotionTransport ble` and `-Listen` still select the glove link and start the microphone.
+Tk uses the host operating system's fonts, window chrome, and scaling. A Mac
+preview verifies layout and navigation; it does not reproduce Windows rendering
+exactly. To test as a Windows user, run the app inside Windows in a VM on your
+Mac or on a Windows PC. Run the commands in the Windows section there, first
+without hardware, then with devices connected to that Windows environment.
+Windows on ARM needs compatible device drivers; virtualized Bluetooth/USB can
+also differ from a physical Windows laptop. Final radio/driver acceptance needs
+real hardware on a supported Windows installation.
 
-That address belongs to the existing demo camera. Substitute `SYNCHRO_BT_ADDRESS` for a different camera. Speech can run while the camera and glove are off. Press **Esc** or pause the pointer while testing speech.
+## Tests
 
-The first microphone start downloads approximately 664 MB of Parakeet/Silero
-model weights. Later starts load the local cache. No API key is needed.
-Allow the app microphone access if your computer asks. Speak, pause for about
-half a second, and look for text in the lower panel.
-
-For camera video, first pair the powered **Synchro-Cam-BT** with Windows.
-Get the current camera PIN separately from the project owner; it is intentionally
-not included in this shareable archive. Only one laptop should use the camera
-at a time, so stop the owner's viewer before connecting from another laptop.
-The glove advertises as **Synchro-Glove** over BLE and is a separate connection.
-
-For glove mouse control on a new computer, keep the MPU still and perform the
-15-second calibration in the viewer. Calibration is saved on that computer.
-**Auto cursor** can activate after calibration and a stable resting pose;
-**Esc** pauses both movement and finger clicks.
-
-## Verify the source
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tools -p "test_*.py" -q
+```bash
+.venv/bin/python -m unittest discover -s tools -p 'test_*.py' -q
 ```
 
-The packaging validation runs this suite from the extracted ZIP with the existing
-project Python runtime. Installing dependencies and connecting the hardware on a
-fresh friend's computer still need to be tested there.
+Use `.venv\Scripts\python.exe` on Windows. To include the native Tk layout/control check, set
+`SYNCHRO_TEST_DESKTOP=1` (`$env:SYNCHRO_TEST_DESKTOP='1'` in PowerShell).
+These tests use packet fixtures and simulated protocol bytes; they do not prove
+physical radio performance. Runtime readings stay empty without hardware.
 
-## Where things are
+Next acceptance task: connect real camera/glove hardware on Windows, verify
+USB/BLE freshness and calibration, then verify Windows cursor movement, dragging,
+scrolling, and pause. Test microphone/RNNoise, Jarvis replies and read-aloud,
+Stop reply/New chat, and writing into an explicitly selected test field. Windows DPI/layout and launcher execution must also
+be checked on Windows.
 
-| Location | Contents |
-| --- | --- |
-| [HANDOFF.md](HANDOFF.md) | Full project context and current runtime wiring |
-| [firmware/MOTION.md](firmware/MOTION.md) | Sensor protocol, angle fusion, calibration and cursor behavior |
-| [firmware/SPEECH.md](firmware/SPEECH.md) | Parakeet v2 + Silero behavior, limits and model attribution |
-| firmware/NanoMotionAngles/ | Current Nano acquisition firmware |
-| firmware/SynchroCamBluetooth/ | Current 640×480 camera firmware |
-| frontend/ | App UI for Windows and Mac |
-| tools/bluetooth_viewer.py | Camera protocol and original Tk viewer tests |
-| tools/motion_*.py | Motion transport, filtering, and OS cursor |
-| tools/speech_*.py | Local speech capture, VAD, and transcription |
-| hardware/ | Wiring diagram PNG and editable SVG |
-| camera/synchro_mac/ | Mac Bluetooth Classic camera window |
-| tools/mac-camera/ | Earlier Mac camera-only source |
-| firmware/README.md | Detailed build notes and historical bring-up |
-| tools/Upload-Camera.ps1 | Camera-only flashing helper, for a prepared build |
+## Source layout
 
-The original PowerShell launch/calibration helpers target the owner's bundled
-Codex Python runtime. On another computer, use the portable Python commands
-above and `.\.venv\Scripts\python.exe tools\calibrate_motion.py` instead.
-No Codex account or installation is required for the Python application.
+- `tools/bluetooth_viewer.py`: native Windows app, including `--preview`.
+- `tools/desktop_theme.py`: consistent colors, controls, and type styles.
+- `tools/motion_*.py`: original sensor, transport, calibration and pointer stack.
+- `tools/speech_*.py`: local speech, RNNoise, and UI.
+- `tools/jarvis_assistant.py`, `tools/text_writer.py`: native Jarvis and Windows writing.
+- `firmware/`, `hardware/`: firmware, protocol documentation and wiring.
+- `HANDOFF.md`: hardware context and historical bring-up notes.
 
-Private keys, pairing PINs, camera photos, microphone audio, raw logs, personal
-calibration profiles, local control tokens, firmware flash backups, Git history,
-build outputs, virtual environments and downloaded model weights are omitted.
-See PACKAGE-CONTENTS.txt and SHA256SUMS.txt inside the archive for the file inventory.
-
+Hardware baseline: `jaydenstab/Synchro`, `test` commit
+`721891c2278a04de3098fd94961e0acaa670fd8e`. Hardware processing modules and firmware
+remain unchanged. The Windows presentation has been updated for consistency.
+Private credentials, captures, calibration profiles and model caches stay local.

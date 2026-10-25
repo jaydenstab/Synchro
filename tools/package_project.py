@@ -12,6 +12,7 @@ SOURCE_DIRS = ('firmware', 'hardware', 'tools')
 EXTENSIONS = {'.md', '.txt', '.json', '.py', '.ps1', '.ino', '.h', '.cjs', '.swift', '.command', '.plist', '.svg', '.png'}
 EXCLUDED_PARTS = {'__pycache__', 'node_modules', '.venv', '.git', '.local', '.build', 'backups', '.DS_Store'}
 SECRET_PATTERNS = (rb'gsk_[A-Za-z0-9]{25,}', rb'sk-(?:proj-)?[A-Za-z0-9_-]{35,}',
+                   rb'AQ\.[A-Za-z0-9_-]{30,}', rb'AIza[A-Za-z0-9_-]{30,}',
                    rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----')
 
 

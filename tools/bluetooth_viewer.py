@@ -139,36 +139,68 @@ def probe(address, channel, count, output):
         camera.close()
 
 
-def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_transport='auto', mpu_ble_address=None, listen=False):
+def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_transport='auto', mpu_ble_address=None, listen=False, pause_pointer=False, preview=False):
     import tkinter as tk
     from tkinter import ttk
     from PIL import ImageTk
     from motion_panel import MotionPanel
     from speech_panel import SpeechPanel
+    from jarvis_assistant import CameraSnapshot, JarvisAssistant
+
+    from desktop_theme import BG, PANEL, INSET, TEXT, MUTED, MINT, WARN, FONT, install_theme
 
     root = tk.Tk()
-    root.title('Synchro | Bluetooth Camera')
-    root.geometry(f'{min(860, root.winfo_screenwidth() - 80)}x{min(800, root.winfo_screenheight() - 100)}')
-    root.minsize(650, 600)
-    root.configure(bg='#10181c')
+    root.title('Synchro · Windows UI preview' if preview else 'Synchro')
+    root.geometry(f'{min(1280, root.winfo_screenwidth() - 60)}x{min(900, root.winfo_screenheight() - 80)}')
+    root.minsize(980, 720)
+    install_theme(root)
     root.columnconfigure(0, weight=1)
-    root.rowconfigure(3, weight=1)
-    style = ttk.Style(root)
-    style.theme_use('clam')
-    style.configure('TButton', padding=9)
-    tk.Label(root, text='Synchro · camera, motion & speech', fg='#eaf1ee', bg='#10181c', font=('Segoe UI', 16, 'bold')).grid(row=0, column=0, pady=(8, 2))
-    tk.Label(root, text=f'Synchro-Cam-BT  ·  {address}', fg='#aec1b9', bg='#10181c', font=('Segoe UI', 9)).grid(row=1, column=0)
-    image_label = tk.Label(root, width=1, height=1, bg='#1a262b', fg='#aec1b9', text='Connecting over Bluetooth...', font=('Segoe UI', 14))
-    image_label.grid(row=3, column=0, padx=20, pady=10, sticky='nsew')
-    status_text = tk.StringVar(value='Connecting...')
-    tk.Label(root, textvariable=status_text, fg='#b5e5ca', bg='#10181c', font=('Segoe UI', 11), wraplength=470).grid(row=4, column=0, padx=10, pady=5)
-    buttons = tk.Frame(root, bg='#10181c')
-    buttons.grid(row=8, column=0, pady=(6, 10))
+    root.rowconfigure(1, weight=1)
+    header = tk.Frame(root, bg=BG, padx=24, pady=18)
+    header.grid(row=0, column=0, sticky='ew')
+    tk.Label(header, text='Synchro', fg=TEXT, bg=BG, font=(FONT, 22, 'bold')).pack(side='left')
+    tk.Label(header, text='Camera, glove, and speech', fg=MUTED, bg=BG).pack(side='left', padx=18)
+    connection_text = tk.StringVar(value='●  Connecting')
+    connection_label = tk.Label(header, textvariable=connection_text, fg=WARN, bg=BG)
+    connection_label.pack(side='right')
+    mic_label = tk.Label(header, text='Mic off', fg=MUTED, bg=BG)
+    mic_label.pack(side='right', padx=18)
+    panes = ttk.Panedwindow(root, orient='horizontal')
+    panes.grid(row=1, column=0, sticky='nsew', padx=24, pady=(0, 18))
+    camera_panel = tk.Frame(panes, bg=PANEL, padx=18, pady=16)
+    camera_panel.columnconfigure(0, weight=1)
+    camera_panel.rowconfigure(2, weight=1)
+    panes.add(camera_panel, weight=3)
+    inspector = ttk.Notebook(panes, width=490)
+    panes.add(inspector, weight=2)
+    tk.Label(camera_panel, text='Camera', fg=TEXT, bg=PANEL,
+             font=(FONT, 17, 'bold'), anchor='w').grid(row=0, column=0, sticky='ew')
+    tk.Label(camera_panel, text=f'Synchro-Cam-BT · {address}', fg=MUTED, bg=PANEL,
+             anchor='w').grid(row=1, column=0, sticky='ew', pady=(4, 14))
+    image_label = tk.Label(camera_panel, width=1, height=1, bg=INSET, fg=MUTED,
+                          text='Waiting for camera\n\nPower on Synchro-Cam-BT and pair it in Windows settings.',
+                          font=(FONT, 12), wraplength=360)
+    image_label.grid(row=2, column=0, sticky='nsew')
+    status_text = tk.StringVar(value='Connecting over Bluetooth…')
+    tk.Label(camera_panel, textvariable=status_text, fg=MUTED, bg=PANEL,
+             anchor='w', justify='left', wraplength=480).grid(row=3, column=0, sticky='ew', pady=(12, 8))
+    buttons = tk.Frame(camera_panel, bg=PANEL)
+    buttons.grid(row=4, column=0, sticky='ew')
+    camera_metrics = tk.StringVar(value='FPS —    ·    Round trip —    ·    Resolution —')
+    tk.Label(camera_panel, textvariable=camera_metrics, fg=TEXT, bg=PANEL,
+             anchor='w', font=(FONT, 10), wraplength=360, justify='left').grid(row=6, column=0, sticky='ew', pady=(12, 0))
+    tk.Label(camera_panel, text='Bluetooth Classic · Local device connection', fg=MUTED, bg=PANEL,
+             anchor='w').grid(row=7, column=0, sticky='ew', pady=(6, 0))
+    photo_note = tk.StringVar(value='')
+    tk.Label(camera_panel, textvariable=photo_note, fg=MUTED, bg=PANEL, anchor='w',
+             justify='left', wraplength=360).grid(row=8, column=0, sticky='ew', pady=(6, 0))
     frames = queue.Queue(maxsize=1)
     events = queue.Queue()
     state = {'thread': None, 'stop': None, 'camera': None, 'frame': None, 'photo': None, 'closing': False}
     timings = deque()
     rotated = tk.BooleanVar(value=rotation == 180)
+    camera_snapshot = CameraSnapshot()
+    assistant = JarvisAssistant(camera_snapshot)
 
     def oriented_picture():
         picture = state['frame'].image
@@ -185,12 +217,34 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         state['photo'] = ImageTk.PhotoImage(picture)
         image_label.config(image=state['photo'], text='')
 
-    motion = MotionPanel(root, mpu_port, motion_transport, mpu_ble_address)
-    motion.frame.grid(row=5, column=0, padx=20, pady=6, sticky='ew')
-    speech = SpeechPanel(root, listen=listen)
+    root.after_idle(lambda: panes.sashpos(0, max(400, root.winfo_width() - 560)))
+
+    motion = MotionPanel(inspector, mpu_port, motion_transport, mpu_ble_address, connect=not preview)
+    if pause_pointer:
+        motion.pointer.disable('Pointer paused for voice testing. Enable to resume.')
+    inspector.add(motion.frame, text='Glove')
+    speech = SpeechPanel(inspector, listen=listen, assistant=assistant, preview=preview)
     motion.sensor.speech = speech.controller
-    speech.frame.grid(row=6, column=0, padx=20, pady=4, sticky='ew')
-    ttk.Checkbutton(root, text='Rotate 180°', variable=rotated, command=render_picture).grid(row=7, column=0, pady=3)
+    motion.sensor.assistant = None if preview else assistant
+    inspector.add(speech.frame, text='Speech & Jarvis')
+    def change_rotation():
+        camera_snapshot.set_rotation(rotated.get())
+        render_picture()
+
+    show_motion = tk.BooleanVar(value=not pause_pointer)
+
+    def toggle_motion():
+        if show_motion.get():
+            inspector.insert(0, motion.frame, text='Glove')
+            inspector.tab(motion.frame, state='normal')
+        else:
+            inspector.select(speech.frame)
+            inspector.hide(motion.frame)
+
+    ttk.Checkbutton(camera_panel, text='Show motion and cursor controls', variable=show_motion,
+                    command=toggle_motion).grid(row=9, column=0, sticky='w', pady=(10, 0))
+    toggle_motion()
+    ttk.Checkbutton(camera_panel, text='Rotate 180°', variable=rotated, command=change_rotation).grid(row=5, column=0, sticky='w', pady=(10, 0))
     image_label.bind('<Configure>', lambda event: render_picture())
 
     def worker(stop_event):
@@ -215,6 +269,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
                         frames.put_nowait(frame)
                     stop_event.wait(max(0, 1 / fps - (time.perf_counter() - began)))
             except (OSError, ValueError, ProtocolError, AttributeError) as error:
+                camera_snapshot.clear()
                 if not stop_event.is_set():
                     print(f'Camera Bluetooth: {error}', file=sys.stderr, flush=True)
                     events.put('Camera unavailable. Check camera power; reconnecting...')
@@ -225,6 +280,8 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
             stop_event.wait(2)
 
     def start():
+        if preview:
+            return
         if state['thread'] and state['thread'].is_alive():
             return
         while not events.empty():
@@ -232,6 +289,13 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         while not frames.empty():
             frames.get_nowait()
         timings.clear()
+        state['frame'] = None
+        state['photo'] = None
+        image_label.config(image='', text='Connecting to camera…')
+        save_button.config(state='disabled')
+        camera_metrics.set('FPS —    ·    Round trip —    ·    Resolution —')
+        connection_text.set('●  Connecting')
+        connection_label.config(fg=WARN)
         state['stop'] = threading.Event()
         state['thread'] = threading.Thread(target=worker, args=(state['stop'],), daemon=True)
         state['thread'].start()
@@ -240,30 +304,40 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         status_text.set('Connecting over Bluetooth...')
 
     def stop():
+        camera_snapshot.clear()
         if state['stop']:
             state['stop'].set()
         camera = state['camera']
         if camera:
             camera.close()
         stop_button.config(state='disabled')
-        status_text.set('Stopped. The laptop can stay connected to its normal Wi-Fi.')
+        status_text.set('Camera stopped. Glove and speech remain available.')
+        connection_text.set('●  Stopped')
+        connection_label.config(fg=MUTED)
+        if state['frame'] is not None:
+            status_text.set('Camera paused · Showing the last received frame.')
 
     def snapshot():
-        if state['frame'] is not None:
+        if state['frame'] is None:
+            return
+        try:
             folder = PROJECT / '.local' / 'bluetooth-photos'
             folder.mkdir(parents=True, exist_ok=True)
-            target = folder / (time.strftime('%Y%m%d-%H%M%S') + '.jpg')
+            target = folder / (time.strftime('%Y%m%d-%H%M%S') + f'-{time.time_ns() % 1_000_000_000:09d}.jpg')
             if rotated.get():
                 oriented_picture().save(target, format='JPEG', quality=95)
             else:
                 target.write_bytes(state['frame'].jpeg)
-            status_text.set('Saved photo: ' + str(target))
+            photo_note.set('Saved to .local/bluetooth-photos/' + target.name)
+        except OSError as error:
+            photo_note.set(f'Could not save photo: {error}')
 
-    start_button = ttk.Button(buttons, text='Start', command=start)
+    start_button = ttk.Button(buttons, text='Start camera', command=start, style='Primary.TButton')
     start_button.pack(side='left', padx=5)
-    stop_button = ttk.Button(buttons, text='Stop', command=stop)
+    stop_button = ttk.Button(buttons, text='Stop', command=stop, style='Danger.TButton')
     stop_button.pack(side='left', padx=5)
-    ttk.Button(buttons, text='Save photo', command=snapshot).pack(side='left', padx=5)
+    save_button = ttk.Button(buttons, text='Save photo', command=snapshot, state='disabled')
+    save_button.pack(side='left', padx=5)
 
     def update():
         if state['closing']:
@@ -273,34 +347,65 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
             text = events.get_nowait()
             if running:
                 status_text.set(text)
+                connection_text.set('●  Reconnecting' if 'unavailable' in text else '●  Connected')
+                connection_label.config(fg=WARN if 'unavailable' in text else MINT)
+                if 'unavailable' in text:
+                    state['frame'] = None
+                    state['photo'] = None
+                    image_label.config(image='', text='Camera unavailable\nCheck power and Windows Bluetooth pairing. Retrying…')
+                    save_button.config(state='disabled')
+                    while not frames.empty():
+                        try:
+                            frames.get_nowait()
+                        except queue.Empty:
+                            break
+                    timings.clear()
+                    camera_metrics.set('FPS —    ·    Round trip —    ·    Resolution —')
         try:
             frame = frames.get_nowait()
         except queue.Empty:
             frame = None
         if frame and running:
             state['frame'] = frame
+            camera_snapshot.update(frame, rotated.get())
             width, height = frame.image.size
             render_picture()
             timings.append(frame.received_at)
             while len(timings) > 2 and timings[0] < frame.received_at - 3:
                 timings.popleft()
             rate = (len(timings) - 1) / (timings[-1] - timings[0]) if len(timings) > 1 else 0
-            status_text.set(f'Bluetooth live  ·  {rate:.1f} fps  ·  {frame.seconds * 1000:.0f} ms/image  ·  {width} × {height}')
+            connection_text.set('●  Live')
+            connection_label.config(fg=MINT)
+            save_button.config(state='normal')
+            camera_metrics.set(f'{rate:.1f} fps  ·  {frame.seconds * 1000:.0f} ms round trip  ·  {width} × {height}')
+            status_text.set('Live image from Synchro-Cam-BT.')
         if state['thread'] and not state['thread'].is_alive():
             start_button.config(state='normal')
+            stop_button.config(state='disabled')
         motion.update()
         speech.update()
+        mic_on = speech.controller.snapshot()['listening']
+        mic_label.config(text='●  Mic on' if mic_on else 'Mic off', fg=MINT if mic_on else MUTED)
         root.after(30, update)
 
     def close():
         state['closing'] = True
         stop()
         speech.close()
+        assistant.close()
         motion.close()
         root.destroy()
 
     root.protocol('WM_DELETE_WINDOW', close)
-    start()
+    if preview:
+        connection_text.set('UI preview · No hardware')
+        connection_label.config(fg=MUTED)
+        image_label.config(text='Camera preview\n\nConnect real hardware when running on Windows.')
+        status_text.set('Windows interface preview on this computer. No camera, glove, or microphone connections are opened.')
+        start_button.config(state='disabled')
+        stop_button.config(state='disabled')
+    else:
+        start()
     update()
     root.mainloop()
 
@@ -319,17 +424,23 @@ def main():
     parser.add_argument('--motion-transport', choices=('auto', 'usb', 'ble'), default='auto',
                         help='auto uses USB if present, otherwise Bluetooth LE')
     parser.add_argument('--mpu-ble-address', help='Optional BLE glove address when multiple gloves are nearby')
+    parser.add_argument('--preview', action='store_true', help='Preview the Windows UI without opening camera, glove, microphone or pointer devices')
+    parser.add_argument('--pause-pointer', action='store_true', help='Start with cursor control paused and the motion panel hidden')
     parser.add_argument('--listen', action='store_true', help='Start continuous laptop microphone transcription')
     args = parser.parse_args()
-    if not args.address or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', args.address):
+    if args.preview and (args.probe or args.listen):
+        parser.error('--preview cannot be combined with --probe or --listen')
+    if sys.platform != 'win32' and not args.preview:
+        parser.error('The hardware viewer targets Windows. Use --preview to inspect its interface on this computer.')
+    if not args.preview and (not args.address or not re.fullmatch(r'(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}', args.address)):
         parser.error('Provide --address with the camera Bluetooth MAC, or save .local/bluetooth-camera.json')
     if not 1 <= args.channel <= 30 or not 0 < args.fps <= 30 or not 0 <= args.probe <= 1000:
         parser.error('Invalid channel, fps, or probe count')
     if args.probe:
         probe(args.address, args.channel, args.probe, args.output)
     else:
-        launch_viewer(args.address, args.channel, args.fps, args.rotate, args.mpu_port,
-                      args.motion_transport, args.mpu_ble_address, args.listen)
+        launch_viewer(args.address or 'Not configured', args.channel, args.fps, args.rotate, args.mpu_port,
+                      args.motion_transport, args.mpu_ble_address, args.listen, args.pause_pointer, args.preview)
 
 
 if __name__ == '__main__':

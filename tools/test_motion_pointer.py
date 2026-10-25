@@ -29,6 +29,9 @@ class Desktop:
         self.escape = False
         self.moves = []
         self.clicks = []
+        self.buttons = []
+        self.held = set()
+        self.scrolls = []
         self.current_position = (500, 500)
 
     def escape_down(self):
@@ -50,6 +53,19 @@ class Desktop:
 
     def click(self, button):
         self.clicks.append(button)
+        self.buttons.extend(((button, 'down'), (button, 'up')))
+
+    def button_down(self, button):
+        self.clicks.append(button)
+        self.buttons.append((button, 'down'))
+        self.held.add(button)
+
+    def button_up(self, button):
+        self.buttons.append((button, 'up'))
+        self.held.discard(button)
+
+    def scroll(self, notches):
+        self.scrolls.append(notches)
 
 
 class MappingTests(unittest.TestCase):
@@ -106,7 +122,7 @@ class MappingTests(unittest.TestCase):
 class ControllerTests(unittest.TestCase):
     def controller(self):
         sensor, desktop = Sensor(), Desktop()
-        return PointerController(sensor, desktop, auto_enable=False, sideways=False, stabilize=False), sensor, desktop
+        return PointerController(sensor, desktop), sensor, desktop
 
     def test_disabled_by_default_and_enable_captures_neutral(self):
         pointer, sensor, desktop = self.controller()
@@ -140,7 +156,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(desktop.position(), (500, 500))
         self.assertEqual(pointer.snapshot()['origin'], (500, 500))
 
-    def test_escape_and_connection_failures_stop_and_stay_off(self):
+    def test_connection_failures_stop_and_stay_off(self):
         variants = [dict(age_seconds=2.1), dict(calibration={'state': 'running'}),
                     dict(calibrated=False)]
         for changes in variants:
@@ -150,12 +166,18 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(pointer.snapshot()['enabled'], changes)
             pointer.tick(live((-170, 5, 0)), pointer.last_time + .01)
             self.assertEqual(desktop.moves, [])
+    def test_escape_does_not_stop_movement_or_dragging(self):
         pointer, sensor, desktop = self.controller()
         pointer.enable()
         desktop.escape = True
-        pointer.tick(live(), pointer.last_time + .01)
-        self.assertFalse(pointer.snapshot()['enabled'])
-        self.assertEqual(desktop.moves, [])
+        t = pointer.last_time
+        pointer.tick(live(left_presses=9, left_down=True, sample_sequence=101), t+.01)
+        pointer.tick(live((-170, 5, 0), left_presses=9, left_down=True, sample_sequence=102), t+.10)
+        self.assertTrue(pointer.snapshot()['enabled'])
+        self.assertEqual(desktop.position(), (988, 12))
+        self.assertEqual(desktop.held, {'left'})
+        pointer.tick(live(left_presses=9, sample_sequence=103), t+.11)
+        self.assertEqual(desktop.held, set())
 
     def test_no_motion_from_backlog_after_pause(self):
         pointer, sensor, desktop = self.controller()
@@ -230,7 +252,7 @@ class ControllerTests(unittest.TestCase):
             pointer.tick(live(orientation_version=100, sample_sequence=100+i), t+i/100)
         self.assertFalse(pointer.snapshot()['suspended'])
 
-    def test_manual_pause_and_escape_during_recovery_remain_off(self):
+    def test_manual_pause_stays_off_but_escape_allows_recovery(self):
         for escape in (False, True):
             pointer, sensor, desktop = self.controller()
             pointer.enable()
@@ -244,8 +266,9 @@ class ControllerTests(unittest.TestCase):
                 pointer.disable()
             for i in range(3, 50):
                 pointer.tick(live((-170, 5, 0), left_presses=10, sample_sequence=100+i), t+i/100)
-            self.assertFalse(pointer.snapshot()['enabled'])
-            self.assertEqual(desktop.moves, [])
+            self.assertEqual(pointer.snapshot()['enabled'], escape)
+            if not escape:
+                self.assertEqual(desktop.moves, [])
             self.assertEqual(desktop.clicks, [])
 
     def test_missing_calibration_cannot_enable(self):
@@ -262,10 +285,16 @@ class ControllerTests(unittest.TestCase):
         for i in range(1, 30):
             pointer.tick(live(left_presses=9, left_down=True, sample_sequence=100+i), t+i/100)
         self.assertEqual(desktop.clicks, ['left'])
+        self.assertEqual(desktop.held, {'left'})
+        self.assertEqual(desktop.buttons, [('left', 'down')])
         for i in range(30, 60):
             pointer.tick(live(left_presses=9, right_presses=14, right_down=True,
                               sample_sequence=100+i), t+i/100)
         self.assertEqual(desktop.clicks, ['left', 'right'])
+        self.assertEqual(desktop.held, {'right'})
+        pointer.tick(live(left_presses=9, right_presses=14, sample_sequence=161), t+.60)
+        self.assertEqual(desktop.held, set())
+        self.assertEqual(desktop.buttons, [('left', 'down'), ('left', 'up'), ('right', 'down'), ('right', 'up')])
         self.assertEqual(pointer.snapshot()['left_clicks'], 1)
         self.assertEqual(pointer.snapshot()['right_clicks'], 1)
 
@@ -299,9 +328,10 @@ class ControllerTests(unittest.TestCase):
         pointer.tick(live(left_down=False, left_presses=9), t+.02)
         self.assertEqual(desktop.clicks, [])
         pointer.tick(live(left_down=True, left_presses=10), t+.03)
+        pointer.tick(live(left_down=True, left_presses=10, sample_sequence=104), t+.12)
         self.assertEqual(desktop.clicks, ['left'])
 
-    def test_stale_reset_calibration_and_escape_never_click(self):
+    def test_stale_reset_and_calibration_never_click(self):
         variants = [dict(fresh=False), dict(age_seconds=.21), dict(ready=False),
                     dict(orientation_version=2), dict(calibration={'state': 'running'}),
                     dict(angles=(170, 81, 0))]
@@ -310,11 +340,6 @@ class ControllerTests(unittest.TestCase):
             pointer.enable()
             pointer.tick(live(left_presses=9, right_presses=14, **changes), pointer.last_time+.01)
             self.assertEqual(desktop.clicks, [], changes)
-        pointer, sensor, desktop = self.controller()
-        pointer.enable()
-        desktop.escape = True
-        pointer.tick(live(left_presses=9), pointer.last_time+.01)
-        self.assertEqual(desktop.clicks, [])
 
     def test_counter_reset_or_backlog_is_discarded_then_new_touch_works(self):
         for count in (0, 50):
@@ -332,12 +357,68 @@ class ControllerTests(unittest.TestCase):
         pointer.tick(live(right_presses=0), pointer.last_time+.01)
         self.assertEqual(desktop.clicks, ['right'])
 
-    def test_both_contacts_emit_one_click_each(self):
+    def test_both_contacts_enter_scrolling_without_clicks(self):
         pointer, sensor, desktop = self.controller()
         pointer.enable()
         pointer.tick(live(left_presses=9, right_presses=14, left_down=True, right_down=True),
                      pointer.last_time+.01)
-        self.assertEqual(desktop.clicks, ['left', 'right'])
+        self.assertEqual(desktop.clicks, [])
+        self.assertTrue(pointer.snapshot()['scrolling'])
+
+    def test_holding_contact_moves_while_down_then_release_ends_drag(self):
+        pointer, sensor, desktop = self.controller()
+        pointer.enable()
+        t = pointer.last_time
+        pointer.tick(live(left_presses=9, left_down=True, sample_sequence=101), t+.01)
+        pointer.tick(live((-170, 5, 0), left_presses=9, left_down=True, sample_sequence=102), t+.10)
+        self.assertEqual(desktop.held, {'left'})
+        self.assertEqual(desktop.position(), (988, 12))
+        self.assertTrue(pointer.snapshot()['left_held'])
+        pointer.tick(live((-170, 5, 0), left_presses=9, sample_sequence=103), t+.11)
+        self.assertFalse(pointer.snapshot()['left_held'])
+        self.assertEqual(desktop.buttons, [('left', 'down'), ('left', 'up')])
+
+    def test_every_pause_and_loss_releases_held_buttons(self):
+        for side, reason in ((side, reason) for side in ('left','right')
+                             for reason in ('manual', 'close', 'recenter', 'stale', 'disconnect',
+                                            'calibration', 'reset', 'vertical', 'missing_contact', 'counter_reset')):
+            with self.subTest(reason=reason):
+                pointer, sensor, desktop = self.controller()
+                pointer.enable()
+                t = pointer.last_time
+                data = live(**{f'{side}_presses': 9 if side == 'left' else 14, f'{side}_down':True})
+                pointer.tick(data, t+.01)
+                data['sample_sequence'] += 1
+                pointer.tick(data, t+.10)
+                self.assertEqual(desktop.held, {side})
+                if reason == 'manual': pointer.disable()
+                elif reason == 'close': pointer.close()
+                elif reason == 'recenter': pointer.recenter()
+                else:
+                    changes = {'stale': {'fresh':False}, 'disconnect':{'age_seconds':3},
+                               'calibration':{'calibration':{'state':'running'}},
+                               'reset':{'orientation_version':2}, 'vertical':{'angles':(0,81,0)},
+                               'missing_contact':{'left_down':None,'right_down':None},
+                               'counter_reset':{'left_presses':0,'right_presses':0}}
+                    data['sample_sequence'] += 1
+                    data.update(changes.get(reason, {}))
+                    pointer.tick(data, t+.11)
+                self.assertEqual(desktop.held, set())
+                self.assertEqual(desktop.buttons[-1], (side,'up'))
+
+    def test_failed_release_is_retried_even_while_disabled(self):
+        pointer, sensor, desktop = self.controller()
+        pointer.enable()
+        pointer.tick(live(left_presses=9, left_down=True), pointer.last_time+.01)
+        pointer.tick(live(left_presses=9, left_down=True, sample_sequence=101), pointer.last_time+.09)
+        original = desktop.button_up
+        def unavailable(side): raise OSError('test release failure')
+        desktop.button_up = unavailable
+        pointer.disable()
+        self.assertTrue(pointer.snapshot()['left_held'])
+        desktop.button_up = original
+        pointer.tick(live(), pointer.last_time+.01)
+        self.assertFalse(pointer.snapshot()['left_held'])
 
 
 @unittest.skipUnless(sys.platform == 'win32', 'Win32 ABI checks')
@@ -374,6 +455,135 @@ class WindowsClickTests(unittest.TestCase):
         with self.assertRaises(OSError):
             backend.click('right')
         self.assertEqual(calls, [[(0, 8), (0, 16)]])
+
+    def test_separate_button_down_and_up_for_dragging(self):
+        for button, flags in (('left',(2,4)), ('right',(8,16))):
+            backend, calls = self.backend((1,1))
+            backend.button_down(button)
+            backend.button_up(button)
+            self.assertEqual(calls, [[(0,flags[0])], [(0,flags[1])]])
+
+    def test_scroll_wheel_uses_signed_120_unit_notches(self):
+        backend = WindowsPointer()
+        recorded = []
+        def send(count, events, size):
+            event = backend.ctypes.cast(events, backend.ctypes.POINTER(backend.input_type))[0]
+            recorded.append((event.mi.dwFlags, backend.ctypes.c_int32(event.mi.mouseData).value))
+            return count
+        backend.user32 = SimpleNamespace(SendInput=send)
+        backend.scroll(2)
+        backend.scroll(-1)
+        self.assertEqual(recorded, [(0x0800,240), (0x0800,-120)])
+
+
+class ScrollTests(unittest.TestCase):
+    def setUp(self):
+        self.sensor, self.desktop = Sensor(), Desktop()
+        self.pointer = PointerController(self.sensor, self.desktop)
+        self.pointer.enable()
+        self.now = self.pointer.last_time
+        self.sequence = 100
+
+    def step(self, pitch=-15, **changes):
+        self.now += .01
+        self.sequence += 1
+        data = live((170,pitch,0), sample_sequence=self.sequence,
+                    left_down=True, right_down=True, left_presses=9, right_presses=14)
+        data.update(changes)
+        self.pointer.tick(data,self.now)
+
+    def test_up_down_scrolls_without_moving_or_clicking_pointer(self):
+        self.step()
+        self.step(-9)
+        self.step(-18)
+        self.assertEqual(self.desktop.scrolls, [2,-3])
+        self.assertEqual(self.desktop.position(), (500,500))
+        self.assertEqual(self.desktop.clicks, [])
+        self.assertEqual(self.desktop.held, set())
+
+    def test_noise_and_held_tilt_do_not_keep_scrolling(self):
+        self.step()
+        for i in range(100): self.step(-15+.4*math.sin(i))
+        self.assertEqual(self.desktop.scrolls, [])
+        self.step(-6)
+        previous = list(self.desktop.scrolls)
+        for _ in range(100): self.step(-6)
+        self.assertEqual(self.desktop.scrolls, previous)
+
+    def test_slightly_staggered_fingers_do_not_click(self):
+        self.step(right_down=False,right_presses=13)
+        self.step()
+        self.step(-9)
+        self.assertEqual(self.desktop.clicks, [])
+        self.assertEqual(self.desktop.scrolls, [2])
+
+    def test_release_one_stops_scroll_and_both_jump_to_current_tilt(self):
+        self.step()
+        self.step(-9)
+        self.step(0,right_down=False)
+        self.step(6,right_down=False)
+        self.assertEqual(self.desktop.scrolls,[2])
+        self.assertEqual(self.desktop.position(),(500,500))
+        self.step(0,left_down=False,right_down=False)
+        self.assertFalse(self.pointer.snapshot()['scrolling'])
+        self.assertEqual(self.desktop.position(),(500,138))
+        self.assertEqual(self.desktop.clicks,[])
+        self.step(-15,left_down=False,right_down=False)
+        self.assertEqual(self.desktop.position(),(500,500))
+
+    def test_repeated_scrolls_preserve_both_axes_and_configured_mapping(self):
+        for reverse, speed, expected in ((False,1,(700,350)), (True,2,(100,800))):
+            with self.subTest(reverse=reverse, speed=speed):
+                self.setUp()
+                self.pointer.configure(speed=speed,invert_x=reverse,invert_y=reverse)
+                for cycle in range(2):
+                    counts = {'left_presses':9+cycle, 'right_presses':14+cycle}
+                    self.step(**counts)
+                    self.step(-9,**counts)
+                    self.step(angles=(178.5,-8.5,0),left_down=False,right_down=False,**counts)
+                    self.assertEqual(self.desktop.position(),expected)
+                    self.assertEqual(self.pointer.origin,(500,500))
+                    self.assertEqual(self.pointer.mapping.neutral,(170,-15))
+                    self.step(left_down=False,right_down=False,**counts)
+                    self.assertEqual(self.desktop.position(),(500,500))
+                self.assertEqual(self.desktop.clicks,[])
+                self.assertEqual(self.desktop.held,set())
+
+    def test_entering_scroll_from_drag_releases_button(self):
+        for _ in range(12): self.step(right_down=False,right_presses=13)
+        self.assertEqual(self.desktop.held,{'left'})
+        self.step()
+        self.assertEqual(self.desktop.held,set())
+        self.assertEqual(self.desktop.buttons,[('left','down'),('left','up')])
+
+    def test_held_chord_at_enable_requires_release(self):
+        self.pointer.disable()
+        self.sensor.data = live(left_down=True,right_down=True)
+        self.pointer.enable()
+        self.now = self.pointer.last_time
+        self.step()
+        self.step(-6)
+        self.assertEqual(self.desktop.scrolls,[])
+        self.assertEqual(self.desktop.clicks,[])
+
+    def test_loss_or_reset_stops_scrolling_but_escape_does_not(self):
+        for changes in ({'fresh':False}, {'orientation_version':2}, {'left_presses':0,'right_presses':0}):
+            self.setUp()
+            self.step()
+            self.step(-6,**changes)
+            self.assertEqual(self.desktop.scrolls,[])
+        self.setUp()
+        self.step()
+        self.desktop.escape = True
+        self.step(-6)
+        self.assertTrue(self.pointer.enabled)
+        self.assertEqual(self.desktop.scrolls,[3])
+
+    def test_reverse_y_reverses_scroll(self):
+        self.pointer.configure(invert_y=True)
+        self.step()
+        self.step(-9)
+        self.assertEqual(self.desktop.scrolls,[-2])
 
 
 if __name__ == '__main__':

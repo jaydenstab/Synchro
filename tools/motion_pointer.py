@@ -1,14 +1,15 @@
-"""Automatic glove pointer with stabilized sideways swipes and finger clicks.
+"""Tilt-to-pointer controller with held finger buttons for clicking and dragging.
 
-X uses experimental inertial displacement; Y uses pitch relative to neutral.
-Legacy roll/pitch mapping remains available to the isolated mapping tests.
+Roll and pitch map directly to screen offsets from a user-selected neutral pose.
+Holding a tilt holds a position; returning to neutral returns to the anchor.
 """
 import math
 import sys
 import threading
 import time
-from motion_translation import CursorStabilizer, horizontal_axis
 
+CHORD_GRACE_SECONDS = .08
+SCROLL_DEGREES_PER_NOTCH = 3.0
 
 def angle_difference(value, reference):
     return (value - reference + 180.0) % 360.0 - 180.0
@@ -60,8 +61,6 @@ class WindowsPointer:
         self.user32.GetCursorPos.restype = wintypes.BOOL
         self.user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
         self.user32.SetCursorPos.restype = wintypes.BOOL
-        self.user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
-        self.user32.GetAsyncKeyState.restype = ctypes.c_short
         self.user32.GetSystemMetrics.argtypes = [ctypes.c_int]
         self.user32.GetSystemMetrics.restype = ctypes.c_int
         # MOUSEINPUT is the largest INPUT union member on both Win32 and Win64.
@@ -81,9 +80,6 @@ class WindowsPointer:
         self.input_type = Input
         self.user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int]
         self.user32.SendInput.restype = wintypes.UINT
-
-    def escape_down(self):
-        return bool(self.user32.GetAsyncKeyState(0x1B) & 0x8000)
 
     def position(self):
         point = self.point_type()
@@ -109,7 +105,7 @@ class WindowsPointer:
         down, up = {'left': (0x0002, 0x0004), 'right': (0x0008, 0x0010)}[button]
         events = (self.input_type * 2)()
         events[0].mi.dwFlags, events[1].mi.dwFlags = down, up
-        # Submit press/release together: holding a contact never holds a button.
+        # A complete tap may occur between received samples.
         inserted = self.user32.SendInput(2, events, self.ctypes.sizeof(self.input_type))
         if inserted != 2:
             if inserted == 1:
@@ -118,9 +114,29 @@ class WindowsPointer:
                                       self.ctypes.sizeof(self.input_type))
             raise OSError('Windows could not send the mouse click. Pointer paused.')
 
+    def _button(self, button, down):
+        flags = {'left': (0x0002, 0x0004), 'right': (0x0008, 0x0010)}[button]
+        event = self.input_type()
+        event.mi.dwFlags = flags[0 if down else 1]
+        if self.user32.SendInput(1, self.ctypes.byref(event), self.ctypes.sizeof(self.input_type)) != 1:
+            raise OSError('Windows could not update the mouse button. Pointer paused.')
+
+    def button_down(self, button):
+        self._button(button, True)
+
+    def button_up(self, button):
+        self._button(button, False)
+
+    def scroll(self, notches):
+        event = self.input_type()
+        event.mi.dwFlags = 0x0800  # MOUSEEVENTF_WHEEL; positive scrolls up.
+        event.mi.mouseData = (int(notches) * 120) & 0xFFFFFFFF
+        if self.user32.SendInput(1, self.ctypes.byref(event), self.ctypes.sizeof(self.input_type)) != 1:
+            raise OSError('Windows could not scroll. Pointer paused.')
+
 
 class PointerController:
-    def __init__(self, sensor, backend=None, *, auto_enable=True, sideways=True, stabilize=True):
+    def __init__(self, sensor, backend=None):
         self.sensor = sensor
         self.backend = backend
         self.mapping = TiltMapping()
@@ -128,19 +144,7 @@ class PointerController:
         self.stop_event = threading.Event()
         self.thread = None
         self.enabled = False
-        self.message = 'Auto cursor: waiting for glove. Hold a comfortable pose briefly after connecting.'
-        self.auto_enable = auto_enable
-        self.manual_pause = False
-        self.auto_candidate = None
-        self.sideways = sideways
-        self.sideways_axis = 0
-        self.sideways_basis = None
-        self.translation_reference = None
-        self.translation_rebase_pending = False
-        self.pixels_per_meter = 5000.0
-        self.stabilize = stabilize
-        self.stabilizer = CursorStabilizer()
-        self.click_freeze_until = 0.0
+        self.message = 'Pointer off. Hold a comfortable pose, then Enable.'
         self.reference_version = None
         self.last_time = None
         self.last_sequence = None
@@ -152,15 +156,41 @@ class PointerController:
         self.contact_counts = {}
         self.contact_blocked = {}
         self.clicks = {'left': 0, 'right': 0}
+        self.held = {'left': False, 'right': False}
+        self.pending_press = {'left': None, 'right': None}
+        self.scrolling = self.scroll_wait_release = False
+        self.scroll_pitch = None
+        self.scroll_remainder = 0.0
+        self.wheel_events = self.wheel_notches = 0
         self.suspended = False
         self.resume_since = None
         self.vertical_hold = False
         self.pause_events = 0
         self.recovery_events = 0
         self.last_pause_reason = None
-        self.on_message = 'Cursor ON · sideways swipe: left/right (approx.) · pitch: up/down · Esc pauses.'
+        self.on_message = 'Tilt ON · one contact: click/hold to drag · both: tilt up/down to scroll · Pause pointer stops.'
+
+    def _release_button(self, side):
+        if self.held[side]:
+            self.backend.button_up(side)
+            self.held[side] = False
+
+    def _release_buttons(self):
+        success = True
+        for side in ('left', 'right'):
+            try:
+                self._release_button(side)
+            except OSError:
+                success = False  # Retain held state and retry on the next loop.
+        return success
 
     def _prime_contacts(self, data):
+        self.pending_press = {'left': None, 'right': None}
+        self.scrolling = self.scroll_wait_release = False
+        self.scroll_pitch = None
+        self.scroll_remainder = 0.0
+        if not self._release_buttons():
+            self.enabled = False
         # Never replay touches made while paused; an already-held pad must be
         # released before it can click. Counters also catch short taps between ticks.
         for side in ('left', 'right'):
@@ -192,158 +222,172 @@ class PointerController:
 
     def enable(self):
         data = self.sensor.snapshot()
-        reason = self._control_unavailable(data)
+        reason = self.unavailable(data)
         if reason:
             raise ValueError(reason)
         if self.backend is None:
             raise ValueError(self.message)
         with self.lock:
-            self._enable_locked(data, time.monotonic())
+            self.mapping.center(data['angles'])
+            self.origin = self.backend.center_position()
+            self.last_position = self.backend.position()
+            self.reference_version = data.get('orientation_version', 0)
+            self.enabled = True
+            self.last_time = time.monotonic()
+            self.last_sequence = data.get('sample_sequence')
+            self.last_sequence_time = self.last_time
+            self._prime_contacts(data)
+            self.suspended = self.vertical_hold = False
+            self.resume_since = None
+            self.message = self.on_message
 
-    def _control_unavailable(self, data):
-        reason = self.unavailable(data)
-        if reason:
-            return reason
-        if self.sideways and (not data.get('translation', {}).get('ready') or
-                              data.get('orientation_quaternion') is None):
-            return 'Hold the glove still briefly to initialize sideways motion.'
-        return None
-
-    def _capture_translation(self, data):
-        if self.sideways:
-            self.sideways_basis = horizontal_axis(data['orientation_quaternion'], self.sideways_axis)
-            self.translation_reference = tuple(data['translation']['position_m'])
-        self.translation_rebase_pending = False
-
-    def _enable_locked(self, data, now):
-        self.mapping.center(data['angles'])
-        self._capture_translation(data)
-        self.origin = self.backend.center_position()
-        self.last_position = self.backend.position()
-        self.stabilizer.reset(self.last_position)
-        self.reference_version = data.get('orientation_version', 0)
-        self.enabled = True
-        self.manual_pause = False
-        self.auto_candidate = None
-        self.last_time = now
-        self.last_sequence = data.get('sample_sequence')
-        self.last_sequence_time = now
-        self._prime_contacts(data)
-        self.suspended = self.vertical_hold = False
-        self.resume_since = None
-        self.message = self.on_message
-
-    def _try_auto_locked(self, data, now):
-        if not self.auto_enable or self.manual_pause or self.backend is None:
-            return
-        if self._control_unavailable(data) or abs(data['angles'][1]) >= 75:
-            self.auto_candidate = None
-            self.message = 'Auto cursor waiting — connect glove and hold it still briefly.'
-            return
-        if self.sideways and not data['translation']['stationary']:
-            self.auto_candidate = None
-            self.message = 'Auto cursor ready — hold your resting pose for a moment.'
-            return
-        if (self.auto_candidate is None or
-            self.auto_candidate[2] != data.get('orientation_version', 0) or
-            any(abs(angle_difference(a, b)) > 2 for a, b in zip(data['angles'][:2], self.auto_candidate[1]))):
-            self.auto_candidate = (now, tuple(data['angles'][:2]), data.get('orientation_version', 0), data.get('sample_sequence'))
-            return
-        if now - self.auto_candidate[0] >= .45 and data.get('sample_sequence') != self.auto_candidate[3]:
-            try:
-                self._enable_locked(data, now)
-            except ValueError as error:
-                self.message = str(error)
-                self.auto_candidate = None
-
-    def _disable_locked(self, message, manual=False):
+    def _disable_locked(self, message):
         self.enabled = False
         self.suspended = self.vertical_hold = False
         self.resume_since = None
-        self.auto_candidate = None
-        if manual:
-            self.manual_pause = True
         self.message = message
+        self.pending_press = {'left': None, 'right': None}
+        self.scrolling = self.scroll_wait_release = False
+        if not self._release_buttons():
+            self.message = 'Pointer paused; retrying mouse-button release.'
 
     def disable(self, message='Pointer off. Hold a comfortable pose, then Enable.'):
         with self.lock:
-            self._disable_locked(message, manual=True)
+            self._disable_locked(message)
 
     def recenter(self):
         data = self.sensor.snapshot()
-        reason = self._control_unavailable(data)
+        reason = self.unavailable(data)
         if reason:
             raise ValueError(reason)
         with self.lock:
             self.mapping.center(data['angles'])
-            self._capture_translation(data)
             self.origin = self.backend.center_position()
             self.last_position = self.backend.position()
-            self.stabilizer.reset(self.last_position)
             self.reference_version = data.get('orientation_version', 0)
             self._prime_contacts(data)
-            self.message = 'Neutral position set. Esc stops the pointer.' if self.enabled else 'Neutral position set; pointer is off.'
+            self.message = 'Neutral position set. Use Pause pointer to stop.' if self.enabled else 'Neutral position set; pointer is off.'
 
-    def configure(self, speed=1.0, invert_x=False, invert_y=False, *, auto_enable=None, stabilize=None, sideways_axis=None):
+    def configure(self, speed=1.0, invert_x=False, invert_y=False):
         if not math.isfinite(speed) or not 0.25 <= speed <= 2.0:
             raise ValueError('Sensitivity must be 0.25–2.0.')
         with self.lock:
             self.mapping.speed = speed
             self.mapping.invert_x, self.mapping.invert_y = bool(invert_x), bool(invert_y)
-            if auto_enable is not None and bool(auto_enable) != self.auto_enable:
-                self.auto_enable = bool(auto_enable)
-                if self.auto_enable:
-                    self.manual_pause = False
-                    self.auto_candidate = None
-            if stabilize is not None:
-                self.stabilize = bool(stabilize)
-            if sideways_axis is not None and sideways_axis != self.sideways_axis:
-                if sideways_axis not in (0, 1):
-                    raise ValueError('Choose sideways axis X or Y.')
-                self.sideways_axis = sideways_axis
-                self._disable_locked('Sideways axis changed. Hold still to resume automatically.')
 
     def snapshot(self):
         with self.lock:
             return {'enabled': self.enabled, 'available': self.backend is not None,
                     'message': self.message, 'neutral': self.mapping.neutral,
-                    'control_mode': 'approximate_swipe_x_pitch_y' if self.sideways else 'position', 'origin': self.origin,
-                    'auto_enable': self.auto_enable, 'manual_pause': self.manual_pause,
-                    'stabilized': self.stabilize, 'sideways_axis': 'XY'[self.sideways_axis],
-                    'pixels_per_estimated_cm': self.pixels_per_meter * self.mapping.speed / 100,
+                    'control_mode': 'position', 'origin': self.origin,
+                    'escape_stops_pointer': False,
                     'pixels_per_degree': self.mapping.pixels_per_degree * self.mapping.speed,
                     'speed': self.mapping.speed, 'invert_x': self.mapping.invert_x,
                     'invert_y': self.mapping.invert_y, 'move_events': self.moves,
                     'left_clicks': self.clicks['left'], 'right_clicks': self.clicks['right'],
+                    'left_held': self.held['left'], 'right_held': self.held['right'],
+                    'button_mode': 'hold_to_drag',
+                    'scroll_mode': 'two_finger_tilt', 'scrolling': self.scrolling,
+                    'wheel_events': self.wheel_events, 'wheel_notches': self.wheel_notches,
                     'suspended': self.suspended, 'pause_events': self.pause_events,
                     'recovery_events': self.recovery_events, 'last_pause_reason': self.last_pause_reason,
                     'requested_distance_px': self.distance, 'last_position': self.last_position}
 
-    def _click_contacts(self, data):
+    def _scroll_contacts(self, data):
+        left, right = data.get('left_down'), data.get('right_down')
+        both = left is True and right is True
+        counts_valid = all(isinstance(data.get(f'{side}_presses'), int) and
+                           isinstance(self.contact_counts.get(side), int) and
+                           ((data[f'{side}_presses'] - self.contact_counts[side]) & 0xFFFFFFFF) in (0, 1)
+                           for side in ('left', 'right'))
+        if not self.scrolling:
+            if not both:
+                return False
+            if not counts_valid or any(self.contact_blocked.values()):
+                self._prime_contacts(data)
+                return True
+            if not self._release_buttons():
+                self._disable_locked('Pointer paused; retrying mouse-button release.')
+                return True
+            self.pending_press = {'left': None, 'right': None}
+            self.scrolling = True
+            self.scroll_pitch = data['angles'][1]
+            self.scroll_remainder = 0.0
+            self.message = 'Scrolling · tilt up/down · release both contacts to return to the pointer.'
+        if not both or not counts_valid:
+            self.scroll_wait_release = True
+        if self.scroll_wait_release:
+            if left is False and right is False:
+                # Keep the original neutral and screen anchor. Apply the current
+                # tilt immediately, as if pointing had continued during scrolling.
+                self._prime_contacts(data)
+                self.message = self.on_message
+                return False
+            return True
+        pitch = data['angles'][1]
+        delta = angle_difference(pitch, self.scroll_pitch)
+        self.scroll_pitch = pitch
+        self.scroll_remainder += delta * self.mapping.speed * (-1 if self.mapping.invert_y else 1)
+        raw_steps = math.trunc(self.scroll_remainder / SCROLL_DEGREES_PER_NOTCH)
+        if raw_steps:
+            steps = max(-4, min(4, raw_steps))
+            self.backend.scroll(steps)
+            self.scroll_remainder -= raw_steps * SCROLL_DEGREES_PER_NOTCH
+            self.wheel_events += 1
+            self.wheel_notches += steps
+        for side in ('left', 'right'):
+            self.contact_counts[side] = data.get(f'{side}_presses')
+        return True
+
+    def _click_contacts(self, data, now):
         for side in ('left', 'right'):
             count, down = data.get(f'{side}_presses'), data.get(f'{side}_down')
             previous = self.contact_counts.get(side)
             self.contact_counts[side] = count
-            if not isinstance(count, int) or not isinstance(previous, int) or down is None:
+            if not isinstance(count, int) or not isinstance(previous, int) or not isinstance(down, bool):
+                self._release_button(side)
+                self.pending_press[side] = None
                 self.contact_blocked[side] = True
                 continue
             if self.contact_blocked[side]:
+                self._release_button(side)
+                self.pending_press[side] = None
                 if not down:
                     self.contact_blocked[side] = False
                 continue
-            # uint32 wrap is a single press. Resets or queued bursts are rebased,
-            # never replayed as a burst of clicks at a possibly different target.
-            if ((count - previous) & 0xFFFFFFFF) == 1:
+            delta = (count - previous) & 0xFFFFFFFF
+            if delta not in (0, 1):
+                self._release_button(side)
+                self.pending_press[side] = None
+                self.contact_blocked[side] = down
+                continue
+            # A new press while already held means a release/re-press happened
+            # between packets. Release the old hold before starting the new one.
+            if self.held[side] and (not down or delta == 1):
+                self._release_button(side)
+            if self.pending_press[side] is not None and (not down or delta == 1):
                 self.backend.click(side)
+                self.clicks[side] += 1
+                self.pending_press[side] = None
+            if delta == 1:
+                if down:
+                    # Allow nearly simultaneous fingers to form a scroll chord
+                    # without briefly clicking the content under the cursor.
+                    self.pending_press[side] = now
+                else:
+                    self.backend.click(side)
+                    self.clicks[side] += 1
+            if (down and self.pending_press[side] is not None and
+                    now - self.pending_press[side] >= CHORD_GRACE_SECONDS):
+                self.held[side] = True
+                self.backend.button_down(side)
+                self.pending_press[side] = None
                 self.clicks[side] += 1
 
     def tick(self, data, now):
         with self.lock:
-            if self.backend is not None and self.backend.escape_down():
-                self._disable_locked('Pointer stopped with Esc. Click Enable to resume.', manual=True)
-                return
             if not self.enabled:
-                self._try_auto_locked(data, now)
+                self._release_buttons()
                 return
             if data.get('calibration', {}).get('state') in ('queued', 'running', 'saving'):
                 self._disable_locked('Pointer off during calibration. Re-enable afterward.')
@@ -351,11 +395,10 @@ class PointerController:
             if not data.get('calibrated'):
                 self._disable_locked('Pointer off: calibration unavailable. Re-enable when calibrated.')
                 return
-            reason = self._control_unavailable(data)
+            reason = self.unavailable(data)
             version = data.get('orientation_version', 0)
             if version != self.reference_version:
                 self.reference_version = version
-                self.translation_rebase_pending = self.sideways
                 reason = 'Tracking restarted; waiting for reliable angles.'
             dt = now - self.last_time
             self.last_time = now
@@ -366,10 +409,10 @@ class PointerController:
                 self.last_sequence, self.last_sequence_time = sequence, now
             elif now - self.last_sequence_time > 0.2:
                 reason = 'Waiting for new sensor samples.'
-            # Disconnects re-arm automatic connection handling. Esc/Pause remain
-            # latched off until the user explicitly enables control again.
+            # Brief radio/host delays freeze output. A sustained outage still
+            # needs an explicit enable, as do Pause and calibration.
             if data.get('age_seconds', 0) > 2 or now - self.last_sequence_time > 2 or dt > 2:
-                self._disable_locked('Connection stopped. Auto cursor will resume after reconnecting.')
+                self._disable_locked('Pointer off: connection stopped for 2 seconds. Re-enable when connected.')
                 return
             angles = data.get('angles')
             if angles is not None and len(angles) == 3 and math.isfinite(angles[1]):
@@ -399,49 +442,22 @@ class PointerController:
                     return
                 self.suspended = False
                 self.resume_since = None
-                if self.translation_rebase_pending:
-                    try:
-                        self._capture_translation(data)
-                    except ValueError:
-                        self.suspended = True
-                        return
-                    self.origin = (self.last_position[0], self.origin[1])
-                self.stabilizer.reset(self.backend.position())
                 self.recovery_events += 1
                 self.message = self.on_message
                 return  # Discard touches made during the interruption.
+            if self._scroll_contacts(data):
+                return
             offset = self.mapping.offset(data['angles'])
             if offset is None:
                 return
             previous = self.backend.position()
-            if self.sideways:
-                displacement = sum((v-r)*a for v, r, a in zip(
-                    data['translation']['position_m'], self.translation_reference, self.sideways_basis))
-                offset = (round(displacement * self.pixels_per_meter * self.mapping.speed *
-                                (-1 if self.mapping.invert_x else 1)), offset[1])
             target = (self.origin[0] + offset[0], self.origin[1] + offset[1])
-            if self.stabilize:
-                if any(not self.contact_blocked.get(side, True) and
-                       ((data.get(f'{side}_presses', 0) - self.contact_counts.get(side, 0)) & 0xFFFFFFFF) == 1
-                       for side in ('left', 'right')):
-                    self.click_freeze_until = now + .12
-                if now < self.click_freeze_until:
-                    self.stabilizer.reset(previous)
-                    self._click_contacts(data)
-                    return
-                target = self.stabilizer.step(target, dt)
             self.last_position = self.backend.set_position(*target)
-            if self.sideways and self.last_position[0] != target[0]:
-                # Discard displacement beyond the screen edge instead of
-                # requiring the user to undo an invisible off-screen swipe.
-                self.translation_reference = tuple(data['translation']['position_m'])
-                self.origin = (self.last_position[0], self.origin[1])
-                self.stabilizer.reset(self.last_position)
             if self.last_position != previous:
                 self.moves += 1
                 self.distance += math.hypot(self.last_position[0] - previous[0],
                                             self.last_position[1] - previous[1])
-            self._click_contacts(data)
+            self._click_contacts(data, now)
 
     def _run(self):
         while not self.stop_event.is_set():

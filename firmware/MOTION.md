@@ -147,56 +147,45 @@ Calibration is stored on the laptop, not in the Nano's flash. Angle fusion
 requires this laptop application over USB or BLE. Standalone onboard angle
 output is a separate addition. The same calibration works over either transport.
 
-## Automatic cursor and approximate sideways motion (Windows)
+## Restored roll/pitch tilt cursor (Windows)
 
-Keep the camera viewer running. With **Auto cursor** checked, a connected,
-calibrated glove takes over after a brief stable resting pose. Leave it still
-for roughly one second at connection: the translation estimator establishes its
-baseline, then the pointer captures neutral. No firmware upload is needed.
+The cursor controller and panel are restored from the edit history immediately
+before the sideways hand movement experiment. Keep the viewer running, hold a
+comfortable neutral pose, and click **Enable pointer**. No firmware upload is needed.
 
-1. Slide the hand sideways in short swipes for left/right movement. X comes from
-   approximate inertial displacement, not roll. The default uses the board's X
-   axis in the horizontal plane at neutral. Choose **Sideways axis Y** if the
-   board is mounted with that axis across the hand, and use **Reverse X** if needed.
-2. Pitch still maps to vertical screen position: holding a pitch holds the target
-   Y position. Default sensitivity is 25 pixels/degree after a 0.5-degree dead zone.
-   X defaults to 50 pixels per *estimated* centimeter; that estimate is not a
-   reliable physical distance. The **Sensitivity** slider scales both.
-3. **Stabilize** smooths small movements with two low-pass stages and a 2-pixel
-   hysteresis zone, responds faster to larger changes, and freezes the pointer
-   for 120 ms around a finger press to reduce pinch-induced cursor movement.
-4. **Set neutral** captures the current pose and displacement reference and
-   returns the pointer to screen center. Changing the sideways axis re-arms
-   automatic activation. Keep the hand roughly level when capturing neutral.
-5. Thumb/index still sends one left click; thumb/middle sends one right click.
-   Release and touch again for another click. A held contact does not drag.
-6. **Esc** works globally, including when another app is focused. It and
-   **Pause pointer/Pause auto** stop movement and clicks and latch a manual
-   pause: reconnecting does not override it. Click **Enable pointer** to resume,
-   or toggle Auto cursor off and back on to re-arm. Unchecking Auto cursor
-   prevents future automatic activation; pause separately to stop active control.
+1. Roll / X tilt controls left/right. Pitch / Y tilt controls up/down.
+   Use **Reverse X** or **Reverse Y** to match the board's mounting.
+2. Both angles map directly to screen positions: holding a tilt holds the target
+   position. Sensitivity defaults to 25 pixels/degree after a 0.5-degree dead zone.
+   The sensitivity slider scales both axes.
+3. **Set neutral** captures the current pose and centers its target on the screen.
+4. Thumb/index holds the left mouse button; thumb/middle holds the right button.
+   Keep a contact touching while tilting to drag, and separate it to release.
+   Quick taps still click. A held contact does not repeat clicks.
+5. Touch both index and middle contacts to the thumb to scroll. Upward pitch
+   changes scroll up; downward changes scroll down. The pointer stays still and
+   neither button is held during scrolling. Holding a fixed tilt stops scrolling.
+   Release both contacts to jump to the position indicated by the current tilt.
+   Scrolling preserves the original neutral pose and screen anchor.
+   **Reverse Y** reverses scrolling too; sensitivity scales it. The default is
+   one wheel notch per 3 degrees. An 80 ms grace period lets nearly simultaneous
+   fingers form the chord without an unintended click.
+6. **Pause pointer** stops movement, scrolling and held buttons. Esc does not
+   affect pointer control. Click **Enable pointer**
+   to resume. Startup and sustained connection outages require an explicit enable.
 
-A single MPU6050 cannot accurately measure absolute hand position. This is the
-requested MPU-only approximation: rotate acceleration into the orientation
-filter's world frame, subtract gravity and an initial residual bias, filter small
-accelerations, integrate short motion, and reset estimated velocity at rest.
-Velocity leakage and bounds reduce runaway drift. Slow or constant-speed motion
-can be missed; rotations, gravity errors and accelerometer bias can cause false
-movement. Returning the hand to the same physical location is not guaranteed to
-return the pointer to the same pixel. This mode needs physical tuning on the
-mounted glove; external tracking would be needed for accurate translation.
+This restoration removes the experimental sideways cursor mapping, automatic
+activation, extra cursor smoothing and pinch freeze added alongside that mode.
+The existing orientation filter and angle dead zone remain. Held buttons and
+two-finger scrolling were added after restoring tilt control.
+Translation helpers remain in the source but are not used by the cursor.
 
 The pointer loop runs independently of camera video at up to 100 updates/sec.
-Brief data interruptions freeze movement and clicks, then recover automatically.
-A longer connection outage re-arms automatic activation after reconnection.
-Orientation resets also re-establish the translation baseline. Near-vertical
-pitch temporarily pauses control until the hand is lowered. Esc/manual pauses
-remain latched. Touches made while paused are discarded.
-
-New regressions cover gravity removal, stationary bias, short swipes and
-rest detection, tremor attenuation, auto-connect/reconnect, explicit pause,
-and ignoring roll for horizontal movement. Tests simulate motion; they cannot
-establish real-world translation accuracy.
+Brief interruptions freeze movement and clicks, then recover automatically.
+Near-vertical pitch temporarily pauses control until the hand is lowered.
+Touches made while paused are discarded. Regression tests cover held-angle
+position, return to neutral, reversal, tracking recovery, hold/release dragging,
+scroll direction and noise, chord transitions, and releasing buttons on lost data.
 
 ## Verification
 
