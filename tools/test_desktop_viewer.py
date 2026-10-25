@@ -60,7 +60,7 @@ class DesktopViewerTests(unittest.TestCase):
                     root.update()
                     self.assertGreater(root.nametowidget(tab).winfo_height(), 60)
                 checks = {w.cget('text'): w for w in walk(root) if isinstance(w, ttk.Checkbutton)}
-                for name in ('Listen for Jarvis', 'Read aloud', 'Type writing requests',
+                for name in ('Listen for Jarvis', 'Read aloud', 'Typing & keys',
                              'Noise suppression · RNNoise', 'Rotate 180°'):
                     self.assertIn(name, checks)
                 self.assertNotIn('Show motion and cursor controls', checks)

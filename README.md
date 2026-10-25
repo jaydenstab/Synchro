@@ -46,7 +46,7 @@ Change Noise suppression before starting the microphone.
 ## Jarvis
 
 The Speech & Jarvis tab keeps both Live transcript and Jarvis conversation views.
-Listen for Jarvis, Read aloud, Type writing requests, Stop reply, and New chat
+Listen for Jarvis, Read aloud, Typing & keys, Stop reply, and New chat
 retain the implementations from the latest test branch. Say “Jarvis” followed by
 a question; terminal punctuation in the recognized transcript submits it.
 
@@ -57,9 +57,19 @@ Core camera, glove, and local transcription work without a cloud account.
 See [firmware/JARVIS.md](firmware/JARVIS.md) for exact behavior and credential setup.
 
 Conversation context lasts until New chat or app shutdown. Read aloud uses the
-Windows voice. Explicit write/type requests can insert text into a selected
-writable field; ordinary answers are not typed. The Type writing requests checkbox
-controls insertion. Stop reply cancels a pending reply. These native assistant
+Windows voice. Every Jarvis request goes to Gemini, including exact dictation and
+keyboard commands. Gemini returns a reply and an ordered list of literal text or
+supported key actions. For example, say “Jarvis, type a generic search query and
+then press Enter,” or “Jarvis, select all and copy.” The app types the generated
+query, then presses Enter, or runs Ctrl+A followed by Ctrl+C. Enter has its normal
+effect in the selected app, including submitting a search or message.
+
+Click the destination text box before speaking and keep it selected until the
+sequence finishes. Typing is paced one character at a time. Focus changes, failed
+input, Esc, or Stop reply stop the remaining actions; partial sequences are never
+automatically retried. The **Typing & keys** checkbox disables all input while
+still showing Gemini's planned actions. Ordinary answers are not typed, and key
+names inside dictated text remain literal. These native assistant
 features do not depend on a web interface or local FastAPI server.
 
 ## Preview while developing on a Mac

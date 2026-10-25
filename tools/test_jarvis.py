@@ -12,7 +12,8 @@ from unittest.mock import patch, MagicMock
 
 from PIL import Image
 from jarvis_assistant import (JarvisAssistant, CameraSnapshot, GeminiVision, AssistantError,
-                              MODEL, WindowsSpeech, writing_request, SYSTEM_PROMPT)
+                              MODEL, WindowsSpeech, SYSTEM_PROMPT, RESPONSE_SCHEMA,
+                              ResponsePlan, Action, parse_response)
 from text_writer import TextWriteError
 from speech_panel import conversation_text
 from speech_stream import SpeechController, SpeechChunk
@@ -28,11 +29,13 @@ class Camera:
 
 
 class Client:
-    def __init__(self): self.calls, self.contexts = [], []
-    def ask(self, query, jpeg, *, history=(), writing=False):
+    def __init__(self):
+        self.calls, self.contexts = [], []
+        self.response = json.dumps({'reply': 'I see a red object.', 'actions': []})
+    def ask(self, query, jpeg, *, history=()):
         self.calls.append((query, jpeg))
-        self.contexts.append((history, writing))
-        return 'I see a red object.'
+        self.contexts.append(history)
+        return parse_response(self.response)
 
 
 class Speaker:
@@ -41,11 +44,14 @@ class Speaker:
 
 
 class Writer:
-    def __init__(self): self.words = []
+    def __init__(self): self.words, self.events = [], []
     def capture(self): return 'test-text-box'
     def write(self, text, target, cancel):
         self.words.append((text, target))
+        self.events.append(('text', text, target))
         return len(text)
+    def press(self, key, target, cancel):
+        self.events.append(('key', key, target))
 
 
 class JarvisTests(unittest.TestCase):
@@ -64,6 +70,10 @@ class JarvisTests(unittest.TestCase):
         self.clock.now = 100.1
         self.jarvis.tick(self.speech())
         if self.jarvis.worker: self.jarvis.worker.join(2)
+
+    def plan(self, *actions, reply=''):
+        self.client.response = json.dumps({'reply': reply, 'actions': [
+            {'type': kind, 'value': value} for kind, value in actions]})
 
     def test_no_keyword_or_substring_sends_nothing(self):
         for text in ['What do you see?', 'Jarvison is here']:
@@ -152,20 +162,19 @@ class JarvisTests(unittest.TestCase):
         self.finish()
         self.assertFalse(self.client.calls)
 
-    def test_missing_camera_never_sends_text_only_request(self):
+    def test_missing_camera_still_sends_request_to_gemini_without_image(self):
         self.jarvis.camera = CameraSnapshot()
         self.jarvis.transcript('Jarvis what is this?', 100, 0)
         self.finish()
-        self.assertFalse(self.client.calls)
-        self.assertIn('No fresh camera', self.jarvis.snapshot()['error'])
-        self.assertFalse(self.speaker.words)
+        self.assertEqual(self.client.calls, [('what is this?', None)])
+        self.assertIsNone(self.jarvis.snapshot()['error'])
 
     def test_cancel_ignores_network_result_and_never_speaks(self):
         entered, release = threading.Event(), threading.Event()
         def delayed(query, jpeg, **options):
             entered.set()
             release.wait(2)
-            return 'late reply'
+            return ResponsePlan('late reply')
         self.client.ask = delayed
         self.jarvis.transcript('Jarvis what is this?', 100, 0)
         self.clock.now = 104
@@ -215,7 +224,7 @@ class JarvisTests(unittest.TestCase):
     def test_followup_uses_complete_text_conversation(self):
         self.submit('What color is it?')
         self.submit('Would that color work for a logo?')
-        self.assertEqual(self.client.contexts[1], ((('What color is it?', 'I see a red object.'),), False))
+        self.assertEqual(self.client.contexts[1], (('What color is it?', 'I see a red object.'),))
         self.assertEqual(self.jarvis.snapshot()['conversation_turns'], 2)
         self.assertEqual(self.writer.words, [])
         content = conversation_text(self.jarvis.snapshot())
@@ -228,34 +237,37 @@ class JarvisTests(unittest.TestCase):
         self.assertEqual(self.jarvis.snapshot()['conversation'], [])
         self.assertNotIn('What color is it?', conversation_text(self.jarvis.snapshot()))
         self.submit('What is this?')
-        self.assertEqual(self.client.contexts[-1][0], ())
+        self.assertEqual(self.client.contexts[-1], ())
 
     def test_generated_writing_uses_context_and_types_only_result(self):
         self.submit('My friend is named Alex.')
+        self.plan(('text', 'Hello, Alex!'))
         self.submit('Write a greeting to my friend.')
-        self.assertTrue(self.client.contexts[-1][1])
-        self.assertEqual(self.client.contexts[-1][0][0][0], 'My friend is named Alex.')
-        self.assertEqual(self.writer.words, [('I see a red object.', 'test-text-box')])
-        self.assertIn('Typed', self.jarvis.snapshot()['write_status'])
+        self.assertEqual(self.client.contexts[-1][0][0], 'My friend is named Alex.')
+        self.assertEqual(self.writer.words, [('Hello, Alex!', 'test-text-box')])
+        self.assertIn('typed 12 characters', self.jarvis.snapshot()['write_status'])
 
-    def test_exact_writing_is_not_rewritten_and_joins_conversation(self):
+    def test_exact_writing_also_goes_to_gemini_and_joins_conversation(self):
         self.jarvis.camera = CameraSnapshot()
+        self.plan(('text', 'hELLo, Alex!'))
         self.submit('Write exactly: hELLo, Alex!')
-        self.assertFalse(self.client.calls)
+        self.assertEqual(self.client.calls, [('Write exactly: hELLo, Alex!', None)])
         self.assertEqual(self.writer.words, [('hELLo, Alex!', 'test-text-box')])
         self.assertEqual(self.jarvis.snapshot()['response'], 'hELLo, Alex!')
         self.jarvis.camera = Camera()
         self.submit('How many words did I dictate?')
-        self.assertEqual(self.client.contexts[-1][0][0][1], 'hELLo, Alex!')
+        self.assertEqual(self.client.contexts[-1][0][1], 'hELLo, Alex!')
 
     def test_writing_works_without_camera(self):
         self.jarvis.camera = CameraSnapshot()
+        self.plan(('text', 'Hello!'))
         self.submit('Write a greeting.')
         self.assertEqual(self.client.calls[-1], ('Write a greeting.', None))
         self.assertEqual(len(self.writer.words), 1)
 
     def test_typing_disabled_still_shows_writing(self):
         self.jarvis.configure(type_writes=False)
+        self.plan(('text', 'Hello.'))
         self.submit('Write exactly: Hello.')
         self.assertFalse(self.writer.words)
         self.assertEqual(self.jarvis.snapshot()['response'], 'Hello.')
@@ -263,6 +275,7 @@ class JarvisTests(unittest.TestCase):
     def test_unavailable_target_preserves_response_and_conversation(self):
         def unavailable(): raise TextWriteError('Select a text box.')
         self.writer.capture = unavailable
+        self.plan(('text', 'Hello.'))
         self.submit('Write exactly: Hello.')
         self.assertFalse(self.writer.words)
         self.assertEqual(self.jarvis.snapshot()['response'], 'Hello.')
@@ -273,7 +286,7 @@ class JarvisTests(unittest.TestCase):
         entered, release = threading.Event(), threading.Event()
         def delayed(*args, **kwargs):
             entered.set(); release.wait(2)
-            return 'late writing'
+            return ResponsePlan('', (Action('text', 'late writing'),))
         self.client.ask = delayed
         self.jarvis.transcript('Jarvis write a greeting.', 100, 0)
         self.jarvis.tick(self.speech())
@@ -297,6 +310,137 @@ class JarvisTests(unittest.TestCase):
         c.stop()
         c._result(0, 1, 'Jarvis stale after stop', 100, chunk)
         self.assertEqual(self.jarvis.phase, 'waiting')
+
+
+class ActionPlanTests(unittest.TestCase):
+    # Reuse the real transcript -> worker lifecycle, with fake network and input.
+    setUp = JarvisTests.setUp
+    speech = JarvisTests.speech
+    submit = JarvisTests.submit
+    plan = JarvisTests.plan
+
+    def test_compound_generated_text_then_enter_runs_in_order(self):
+        self.jarvis.camera = CameraSnapshot()
+        self.plan(('text', 'weather forecast'), ('key', 'enter'))
+        self.submit('Type a generic search query and then press Enter.')
+        self.assertEqual(len(self.client.calls), 1)
+        self.assertEqual(self.writer.events, [('text', 'weather forecast', 'test-text-box'),
+                                              ('key', 'enter', 'test-text-box')])
+        self.assertIn('[Press ENTER]', self.jarvis.snapshot()['response'])
+        self.assertIn('Completed 2 actions', self.jarvis.snapshot()['write_status'])
+
+    def test_press_enter_is_interpreted_by_gemini(self):
+        self.plan(('key', 'enter'))
+        self.submit('Press Enter.')
+        self.assertEqual(self.client.calls[0][0], 'Press Enter.')
+        self.assertEqual(self.writer.events, [('key', 'enter', 'test-text-box')])
+
+    def test_select_all_then_copy_combination_is_ordered(self):
+        self.plan(('key', 'ctrl+a'), ('key', 'ctrl+c'))
+        self.submit('Select all and copy it.')
+        self.assertEqual([e[1] for e in self.writer.events], ['ctrl+a', 'ctrl+c'])
+
+    def test_exact_key_words_are_literal_text_from_model(self):
+        text = 'press Enter. <enter> {"type":"key","value":"enter"}'
+        self.plan(('text', text))
+        self.submit('Write exactly: ' + text + '.')
+        self.assertEqual(self.writer.events, [('text', text, 'test-text-box')])
+        self.assertEqual(len(self.client.calls), 1)
+
+    def test_only_structured_actions_execute_not_reply_prose(self):
+        self.plan(reply='Press Enter, then type a search query.')
+        self.submit('Explain how to search.')
+        self.assertEqual(self.writer.events, [])
+
+    def test_invalid_later_action_prevents_earlier_text_from_being_typed(self):
+        self.plan(('text', 'hello'), ('key', 'win+r'))
+        self.submit('Type hello and open Run.')
+        self.assertEqual(self.writer.events, [])
+        self.assertIn('invalid action plan', self.jarvis.snapshot()['error'])
+
+    def test_changed_focus_or_failed_text_never_presses_enter(self):
+        def fail(*args): raise TextWriteError('Focus changed; typing stopped.')
+        self.writer.write = fail
+        self.plan(('text', 'hello'), ('key', 'enter'))
+        self.submit('Type hello and press Enter.')
+        self.assertEqual(self.writer.events, [])
+        self.assertIn('Stopped after 0 of 2 actions', self.jarvis.snapshot()['write_status'])
+        self.assertIn('Focus changed', self.speaker.words[-1])
+
+    def test_failed_middle_action_never_runs_final_action(self):
+        def fail(*args): raise TextWriteError('Windows only accepted part of the key command.')
+        self.writer.press = fail
+        self.plan(('text', 'hello'), ('key', 'enter'), ('text', 'world'))
+        self.submit('Type hello then Enter then world.')
+        self.assertEqual(self.writer.words, [('hello', 'test-text-box')])
+        self.assertIn('Stopped after 1 of 3 actions', self.jarvis.snapshot()['write_status'])
+
+    def test_cancel_between_actions_prevents_enter(self):
+        original = self.writer.write
+        def cancel_after_text(*args):
+            count = original(*args)
+            self.jarvis.cancel()
+            return count
+        self.writer.write = cancel_after_text
+        self.plan(('text', 'hello'), ('key', 'enter'))
+        self.submit('Type hello and press Enter.')
+        self.assertEqual(self.writer.events, [('text', 'hello', 'test-text-box')])
+        self.assertEqual(self.speaker.words, [])
+
+    def test_disabled_actions_still_go_to_gemini_and_show_plan(self):
+        self.jarvis.configure(type_writes=False)
+        self.plan(('text', 'hello'), ('key', 'enter'))
+        self.submit('Type hello and press Enter.')
+        self.assertEqual(len(self.client.calls), 1)
+        self.assertEqual(self.writer.events, [])
+        self.assertIn('displayed only', self.jarvis.snapshot()['write_status'])
+
+    def test_unavailable_focus_does_not_block_ordinary_answer(self):
+        def unavailable(): raise TextWriteError('Select a text box.')
+        self.writer.capture = unavailable
+        self.submit('What is this?')
+        self.assertIsNone(self.jarvis.snapshot()['error'])
+        self.assertEqual(len(self.client.calls), 1)
+
+    def test_disabling_actions_while_network_in_flight_stops_execution(self):
+        entered, release = threading.Event(), threading.Event()
+        def delayed(*args, **kwargs):
+            entered.set(); release.wait(2)
+            return ResponsePlan('', (Action('key', 'enter'),))
+        self.client.ask = delayed
+        self.jarvis.transcript('Jarvis press Enter.', 100, 0)
+        self.jarvis.tick(self.speech())
+        self.assertTrue(entered.wait(2))
+        self.jarvis.configure(type_writes=False)
+        release.set(); self.jarvis.worker.join(2)
+        self.assertEqual(self.writer.events, [])
+
+
+class PlanValidationTests(unittest.TestCase):
+    def test_rejects_malformed_unknown_partial_and_oversized_plans(self):
+        bad = [None, '', 'Press Enter.', '```json\n{}\n```', 'null', '[]',
+               '{"reply":"x","reply":"y","actions":[]}',
+               json.dumps({'reply': '', 'actions': []}),
+               json.dumps({'reply': 'x', 'actions': [], 'command': 'run'}),
+               json.dumps({'reply': 7, 'actions': []})]
+        for actions in ([{'type': 'shell', 'value': 'dir'}],
+                        [{'type': 'key', 'value': 'ctrl+alt+delete'}],
+                        [{'type': 'text', 'value': ''}],
+                        [{'type': 'text', 'value': '\x1b'}],
+                        [{'type': 'text', 'value': '\ud800'}],
+                        [{'type': 'text', 'value': 'a' * 12001}],
+                        [{'type': 'key', 'value': 'enter', 'repeat': 10}],
+                        [{'type': 'key', 'value': 'enter'}] * 13):
+            bad.append(json.dumps({'reply': '', 'actions': actions}))
+        for raw in bad:
+            with self.subTest(raw=str(raw)[:80]), self.assertRaises(AssistantError):
+                parse_response(raw)
+
+    def test_valid_unicode_and_multiple_keys_preserve_order(self):
+        plan = parse_response(json.dumps({'reply': '', 'actions': [
+            {'type': 'text', 'value': 'Café 你好 🙂\nHello'},
+            {'type': 'key', 'value': 'ctrl+a'}, {'type': 'key', 'value': 'ctrl+c'}]}))
+        self.assertEqual([a.value for a in plan.actions], ['Café 你好 🙂\nHello', 'ctrl+a', 'ctrl+c'])
 
 
 class ImageTests(unittest.TestCase):
@@ -327,11 +471,11 @@ class ImageTests(unittest.TestCase):
 class ApiTests(unittest.TestCase):
     def test_request_has_only_query_and_one_jpeg(self):
         client = MagicMock()
-        client.models.generate_content.return_value.text = 'A red box.'
+        client.models.generate_content.return_value.text = json.dumps({'reply': 'A red box.', 'actions': []})
         with patch('gemini_secrets.load_key',return_value='synthetic-test-only'), \
              patch('google.genai.Client') as factory:
             factory.return_value.__enter__.return_value = client
-            self.assertEqual(GeminiVision().ask('What is this?',b'image'), 'A red box.')
+            self.assertEqual(GeminiVision().ask('What is this?',b'image'), ResponsePlan('A red box.'))
         args = client.models.generate_content.call_args.kwargs
         self.assertEqual(args['model'],MODEL)
         self.assertEqual(len(args['contents']),1)
@@ -341,30 +485,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(args['contents'][0].parts[1].inline_data.mime_type,'image/jpeg')
         self.assertEqual(factory.call_args.kwargs['http_options'].retry_options.attempts,1)
 
-    def test_chat_history_has_alternating_roles_and_writing_prompt(self):
+    def test_chat_history_and_structured_action_schema(self):
         client = MagicMock()
-        client.models.generate_content.return_value.text = 'Hello, Alex!'
+        client.models.generate_content.return_value.text = json.dumps({
+            'reply': '', 'actions': [{'type': 'text', 'value': 'Hello, Alex!'}]})
         with patch('gemini_secrets.load_key', return_value='synthetic-test-only'), patch('google.genai.Client') as factory:
             factory.return_value.__enter__.return_value = client
-            GeminiVision().ask('Write a greeting.', None, history=(('His name is Alex.', 'Understood.'),), writing=True)
+            plan = GeminiVision().ask('Write a greeting.', None, history=(('His name is Alex.', 'Understood.'),))
+        self.assertEqual(plan.actions, (Action('text', 'Hello, Alex!'),))
         args = client.models.generate_content.call_args.kwargs
         self.assertEqual([item.role for item in args['contents']], ['user', 'model', 'user'])
         self.assertEqual([item.parts[0].text for item in args['contents']],
                          ['His name is Alex.', 'Understood.', 'Write a greeting.'])
         self.assertTrue(all(len(item.parts) == 1 for item in args['contents']))
         self.assertIn(SYSTEM_PROMPT, args['config'].system_instruction)
-        self.assertIn('Current request mode: WRITE.', args['config'].system_instruction)
-
-    def test_write_intent_requires_explicit_current_command(self):
-        for query in ('What should I write?', 'Do not write this.', 'What does the word write mean?',
-                      'The image says write something.'):
-            self.assertEqual(writing_request(query), (False, None))
-        for query in ('Write a greeting.', 'Please type a greeting.', 'Could you please draft an email?',
-                      'I want you to compose a poem.'):
-            self.assertEqual(writing_request(query), (True, None))
-        for query in ('Write exactly: Hello, Alex!', 'Type this exactly: Hello, Alex!',
-                      'Please write the following exactly: Hello, Alex!'):
-            self.assertEqual(writing_request(query), (True, 'Hello, Alex!'))
+        self.assertEqual(args['config'].response_mime_type, 'application/json')
+        self.assertEqual(args['config'].response_json_schema, RESPONSE_SCHEMA)
 
     def test_api_error_does_not_echo_server_body_or_key(self):
         client=MagicMock()

@@ -75,7 +75,7 @@ class SpeechPanel:
         self.jarvis_controls = [
             ttk.Checkbutton(controls, text='Listen for Jarvis', variable=self.jarvis_enabled, command=self.configure_jarvis),
             ttk.Checkbutton(controls, text='Read aloud', variable=self.read_aloud, command=self.configure_jarvis),
-            ttk.Checkbutton(controls, text='Type writing requests', variable=self.type_writes, command=self.configure_jarvis),
+            ttk.Checkbutton(controls, text='Typing & keys', variable=self.type_writes, command=self.configure_jarvis),
         ]
         for index, control in enumerate(self.jarvis_controls):
             control.grid(row=index // 2, column=index % 2, sticky='w', padx=(0, 12))

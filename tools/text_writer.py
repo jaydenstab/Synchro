@@ -1,11 +1,25 @@
-"""Insert plain Unicode text into the same focused, writable Windows text field.
+"""Paced Unicode typing and explicit key chords in the same selected text field.
 
-No clipboard, window activation, shortcuts or submit/Enter key is used.
-UI Automation supplies identity and editability, never the field's contents.
+Text never becomes a key command. UI Automation reads identity and editability,
+not field contents. No clipboard replacement or window activation is used.
 """
 from dataclasses import dataclass
 import os
 import threading
+
+CHARACTER_INTERVAL = .012
+# Deliberately limited to editing/navigation. Values are virtual-key sequences,
+# pressed in order and released in reverse, once per explicit voice command.
+KEY_CHORDS = {
+    'enter': (0x0D,), 'shift+enter': (0x10, 0x0D),
+    'tab': (0x09,), 'shift+tab': (0x10, 0x09),
+    'backspace': (0x08,), 'delete': (0x2E,), 'escape': (0x1B,),
+    'left': (0x25,), 'up': (0x26,), 'right': (0x27,), 'down': (0x28,),
+    'home': (0x24,), 'end': (0x23,), 'page up': (0x21,), 'page down': (0x22,),
+    **{'ctrl+' + letter: (0x11, ord(letter.upper())) for letter in 'acvxzybiu'},
+    'ctrl+shift+z': (0x11, 0x10, 0x5A),
+}
+EXTENDED_KEYS = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2E}
 
 
 class TextWriteError(Exception):
@@ -134,6 +148,8 @@ class WindowsTextBackend:
         return None
 
     def send(self, text):
+        if len(text) != 1:
+            raise TextWriteError('Typing must send one Unicode character at a time.')
         raw = text.encode('utf-16-le')
         units = [int.from_bytes(raw[i:i+2], 'little') for i in range(0, len(raw), 2)]
         events = (self.input_type * (2 * len(units)))()
@@ -147,6 +163,32 @@ class WindowsTextBackend:
                 release = events[inserted]
                 self.user32.SendInput(1, self.c.byref(release), self.c.sizeof(self.input_type))
             raise TextWriteError('Windows could not finish typing. Text may be partially inserted; no retry was sent.')
+
+    def press(self, key):
+        if key not in KEY_CHORDS:
+            raise TextWriteError('That key combination is not supported.')
+        keys = KEY_CHORDS[key]
+        events = (self.input_type * (2 * len(keys)))()
+        ordered = [(vk, False) for vk in keys] + [(vk, True) for vk in reversed(keys)]
+        for event, (vk, released) in zip(events, ordered):
+            event.type, event.ki.wVk = 1, vk
+            event.ki.dwFlags = (0x0001 if vk in EXTENDED_KEYS else 0) | (0x0002 if released else 0)
+        inserted = self.user32.SendInput(len(events), events, self.c.sizeof(self.input_type))
+        if inserted != len(events):
+            held = []
+            for vk, released in ordered[:inserted]:
+                if released:
+                    held.remove(vk)
+                else:
+                    held.append(vk)
+            # Release only keys that this command successfully pressed. Never
+            # retry a partial chord: that could submit or modify the field twice.
+            for vk in reversed(held):
+                release = self.input_type()
+                release.type, release.ki.wVk = 1, vk
+                release.ki.dwFlags = 0x0002 | (0x0001 if vk in EXTENDED_KEYS else 0)
+                self.user32.SendInput(1, self.c.byref(release), self.c.sizeof(self.input_type))
+            raise TextWriteError('Windows only accepted part of the key command. It was not retried.')
 
 
 class WindowsTextWriter:
@@ -163,6 +205,25 @@ class WindowsTextWriter:
         with self.lock:
             return self._backend().focused()
 
+    def _check_target(self, backend, target, cancel):
+        if target is None:
+            raise TextWriteError('No destination text box was selected when the request started.')
+        if cancel.is_set():
+            raise TextWriteError('Typing cancelled. Any text already inserted remains.')
+        interruption = backend.interrupted()
+        if interruption:
+            raise TextWriteError(interruption)
+        if backend.focused() != target:
+            raise TextWriteError('Focus changed; typing stopped. The response is still in Jarvis.')
+
+    def press(self, key, target, cancel):
+        if key not in KEY_CHORDS:
+            raise TextWriteError('That key combination is not supported.')
+        with self.lock:
+            backend = self._backend()
+            self._check_target(backend, target, cancel)
+            backend.press(key)
+
     def write(self, text, target, cancel):
         if target is None:
             raise TextWriteError('No destination text box was selected when the request started.')
@@ -172,15 +233,12 @@ class WindowsTextWriter:
             raise TextWriteError('The writing contains unsupported control characters; it was not typed.')
         with self.lock:
             backend = self._backend()
-            # Unicode packets carry literal characters, including line breaks;
-            # never synthesize Enter, Tab, paste or other shortcut keys.
-            for start in range(0, len(text), 64):
-                if cancel.is_set():
+            # Large bursts of VK_PACKET events can repeat or lose characters in
+            # some editors. Send one complete code point (including surrogate
+            # pairs), release it, and give the target time to process it.
+            for index, character in enumerate(text):
+                if index and cancel.wait(CHARACTER_INTERVAL):
                     raise TextWriteError('Typing cancelled. Any text already inserted remains.')
-                interruption = backend.interrupted()
-                if interruption:
-                    raise TextWriteError(interruption)
-                if backend.focused() != target:
-                    raise TextWriteError('Focus changed; typing stopped. The response is still in Jarvis.')
-                backend.send(text[start:start+64])
+                self._check_target(backend, target, cancel)
+                backend.send(character)
         return len(text)

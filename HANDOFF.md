@@ -10,8 +10,12 @@ firmware/JARVIS.md. After “Jarvis”, once the transcript ends in `.`, `?` or 
 recognized request text and one fresh camera frame to Gemini 3.5 Flash-Lite,
 shows the answer and speaks it with Windows TTS. Its key is encrypted locally
 and excluded from Git/share packages. A receiving computer needs its own key.
-Jarvis also writes into the selected text box on explicit writing commands, with
-verbatim recognized text for “write exactly”. All questions and answers share
+Jarvis sends every activated request to Gemini, including exact dictation and
+key commands. Gemini returns an ordered, validated plan of text and key actions,
+so “type a generic search query and then press Enter” works as one request.
+The “Typing & keys” toggle controls execution; focus changes or input failures
+stop the remaining actions without retry. Typing uses paced individual characters
+to address reported repeats. All questions and answers share
 one in-memory conversation until New chat or app shutdown. The full test suite
 passes, and real Gemini writing plus a follow-up memory check passed.
 
