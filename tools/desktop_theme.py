@@ -11,6 +11,7 @@ LINE = '#30363b'
 TEXT = '#f3f6f4'
 MUTED = '#9aa39c'
 MINT = '#3ddc97'
+MINT_BRIGHT = '#65e6ae'
 INK = '#06281a'
 WARN = '#f0b429'
 DANGER = '#ff6b6b'
@@ -53,7 +54,7 @@ def install_theme(root):
     ):
         element = name + '.surface'
         normal = face(fill, edge)
-        hover = face('#65e6ae' if name == 'Primary.TButton' else '#29312e', MINT if name == 'Primary.TButton' else '#46564d')
+        hover = face(MINT_BRIGHT if name == 'Primary.TButton' else '#29312e', MINT if name == 'Primary.TButton' else '#46564d')
         pressed = face('#28b97b' if name == 'Primary.TButton' else INSET, edge)
         disabled = face('#19231e' if name == 'Primary.TButton' else '#171b1e', '#252b2e')
         focused = face(fill, MINT if name != 'Primary.TButton' else TEXT)
@@ -98,6 +99,13 @@ def install_theme(root):
               selectbackground=[('readonly', INSET)], selectforeground=[('readonly', TEXT)])
     style.configure('Horizontal.TProgressbar', troughcolor=INSET, background=MINT,
                     bordercolor=INSET, lightcolor=MINT, darkcolor=MINT, thickness=5)
+    # The mic meter is a level, not the thin calibration progress bar.
+    for name, fill in (
+        ('Level.Horizontal.TProgressbar', MINT),
+        ('Level.Voice.Horizontal.TProgressbar', MINT_BRIGHT),
+    ):
+        style.configure(name, troughcolor=LINE, background=fill, bordercolor=LINE,
+                        lightcolor=fill, darkcolor=fill, thickness=12, borderwidth=0)
     style.configure('Horizontal.TScale', troughcolor=INSET, background='#6e8276',
                     bordercolor=PANEL, lightcolor=PANEL, darkcolor=PANEL)
     style.configure('Vertical.TScrollbar', background='#354139', troughcolor=INSET,

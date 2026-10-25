@@ -73,6 +73,14 @@ class DesktopViewerTests(unittest.TestCase):
                     self.assertEqual([(w.cget('bg'), w.cget('fg')) for w in banners], [(BANNER, BANNER_TEXT)])
                 else:
                     self.assertEqual(banners, [])
+                levels = [w for w in walk(root) if isinstance(w, ttk.Progressbar) and str(w.cget('style')).startswith('Level.')]
+                captions = [w for w in walk(root) if isinstance(w, tk.Label) and w.cget('text') == 'Input level']
+                self.assertEqual(len(levels), 1)
+                self.assertEqual(len(captions), 1)
+                self.assertGreater(levels[0].winfo_width(), 160)
+                bar_mid = levels[0].winfo_rooty() + levels[0].winfo_height() / 2
+                caption_mid = captions[0].winfo_rooty() + captions[0].winfo_height() / 2
+                self.assertLess(abs(bar_mid - caption_mid), 8)
                 # Both transcript/conversation views and every screenshot control must survive the redesign.
                 inner = next(w for w in walk(root) if isinstance(w, ttk.Notebook) and w is not notebook)
                 self.assertEqual([inner.tab(t, 'text') for t in inner.tabs()], ['Live transcript', 'Jarvis conversation'])

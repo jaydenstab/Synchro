@@ -1,7 +1,7 @@
 """Visible mic controls and rolling transcript; all widgets stay on the Tk thread."""
 import tkinter as tk
 from tkinter import ttk
-from desktop_theme import FONT, PANEL, MUTED, MINT, DANGER, heading, TextPane, wrap_labels
+from desktop_theme import FONT, PANEL, MUTED, MINT, MINT_BRIGHT, DANGER, heading, TextPane, wrap_labels
 
 from speech_stream import SpeechController
 from jarvis_assistant import READY_MESSAGE
@@ -24,10 +24,10 @@ class SpeechPanel:
         self.controller = SpeechController()
         self.assistant = assistant
         self.controller.assistant = None if preview else assistant
-        self.frame = tk.Frame(root, bg='#15181b', padx=18, pady=18)
+        self.frame = tk.Frame(root, bg=PANEL, padx=18, pady=18)
         self.frame.columnconfigure(1, weight=1)
         heading(self.frame, 'Microphone', 'Local transcription · Jarvis uses Gemini').grid(row=0, column=0, columnspan=5, sticky='ew', pady=(0, 14))
-        self.frame.rowconfigure(5, weight=1)
+        self.frame.rowconfigure(6, weight=1)
         self.button = ttk.Button(self.frame, text='Start mic', command=self.toggle, style='Primary.TButton')
         self.button.grid(row=2, column=0, sticky='w', pady=(8, 0))
         self.device = ttk.Combobox(self.frame, state='readonly', width=25)
@@ -49,16 +49,21 @@ class SpeechPanel:
             self.device['values'] = ['Default laptop microphone' if preview else 'Microphone unavailable — install speech dependencies']
         self.device.current(0)
         ttk.Button(self.frame, text='Clear text', command=self.controller.clear).grid(row=2, column=1, sticky='w', padx=8, pady=(8, 0))
-        self.level = ttk.Progressbar(self.frame, maximum=100, length=65)
-        self.level.grid(row=2, column=2, columnspan=3, sticky='ew', pady=(8, 0))
+        meter = tk.Frame(self.frame, bg=PANEL)
+        meter.grid(row=3, column=0, columnspan=5, sticky='ew', pady=(12, 0))
+        meter.columnconfigure(1, weight=1)
+        self.level_caption = tk.Label(meter, text='Input level', bg=PANEL, fg=MUTED, font=(FONT, 9), anchor='w')
+        self.level_caption.grid(row=0, column=0, sticky='w', padx=(0, 12))
+        self.level = ttk.Progressbar(meter, maximum=100, style='Level.Horizontal.TProgressbar')
+        self.level.grid(row=0, column=1, sticky='ew')
         self.noise_enabled = tk.BooleanVar(value=True)
         self.noise_control = ttk.Checkbutton(self.frame, text='Noise suppression · RNNoise', variable=self.noise_enabled)
-        self.noise_control.grid(row=3, column=0, columnspan=5, sticky='w', pady=(6, 0))
+        self.noise_control.grid(row=4, column=0, columnspan=5, sticky='w', pady=(8, 0))
         self.status = tk.Label(self.frame, text='', bg=PANEL, fg=MUTED,
                                font=(FONT, 9), anchor='w', justify='left', wraplength=440)
-        self.status.grid(row=4, column=0, columnspan=5, sticky='ew', pady=(4, 10))
+        self.status.grid(row=5, column=0, columnspan=5, sticky='ew', pady=(4, 10))
         self.tabs = ttk.Notebook(self.frame)
-        self.tabs.grid(row=5, column=0, columnspan=5, sticky='nsew')
+        self.tabs.grid(row=6, column=0, columnspan=5, sticky='nsew')
         transcript_pane = TextPane(self.tabs)
         reply_pane = TextPane(self.tabs)
         self.text = transcript_pane.text
@@ -71,7 +76,7 @@ class SpeechPanel:
         self.read_aloud = tk.BooleanVar(value=True)
         self.type_writes = tk.BooleanVar(value=True)
         controls = tk.Frame(self.frame, bg=PANEL)
-        controls.grid(row=6, column=0, columnspan=5, sticky='ew', pady=(10, 0))
+        controls.grid(row=7, column=0, columnspan=5, sticky='ew', pady=(10, 0))
         self.jarvis_controls = [
             ttk.Checkbutton(controls, text='Listen for Jarvis', variable=self.jarvis_enabled, command=self.configure_jarvis),
             ttk.Checkbutton(controls, text='Read aloud', variable=self.read_aloud, command=self.configure_jarvis),
@@ -80,14 +85,14 @@ class SpeechPanel:
         for index, control in enumerate(self.jarvis_controls):
             control.grid(row=index // 2, column=index % 2, sticky='w', padx=(0, 12))
         actions = tk.Frame(self.frame, bg=PANEL)
-        actions.grid(row=7, column=0, columnspan=5, sticky='ew', pady=(8, 0))
+        actions.grid(row=8, column=0, columnspan=5, sticky='ew', pady=(8, 0))
         self.stop_reply = ttk.Button(actions, text='Stop reply', style='Danger.TButton', command=lambda: self.assistant and self.assistant.cancel())
         self.stop_reply.pack(side='left')
         self.new_chat = ttk.Button(actions, text='New chat', command=lambda: self.assistant and self.assistant.new_conversation())
         self.new_chat.pack(side='left', padx=8)
-        self.jarvis_status = tk.Label(self.frame, bg='#15181b', fg='#3ddc97', font=(FONT, 9),
+        self.jarvis_status = tk.Label(self.frame, bg=PANEL, fg=MINT, font=(FONT, 9),
                                       anchor='w', wraplength=440)
-        self.jarvis_status.grid(row=8, column=0, columnspan=5, sticky='ew', pady=(3, 0))
+        self.jarvis_status.grid(row=9, column=0, columnspan=5, sticky='ew', pady=(3, 0))
         wrap_labels(self.frame, self.status, self.jarvis_status)
         if assistant is not None:
             self.tabs.select(self.reply.master)
@@ -120,7 +125,12 @@ class SpeechPanel:
         self.noise_control.config(state='disabled' if active or self.preview else 'normal')
         for control in self.jarvis_controls + [self.stop_reply, self.new_chat]:
             control.config(state='disabled' if self.preview else 'normal')
+        voice = active and data['voice']
+        style_name = 'Level.Voice.Horizontal.TProgressbar' if voice else 'Level.Horizontal.TProgressbar'
+        if self.level.cget('style') != style_name:
+            self.level.configure(style=style_name)
         self.level['value'] = 100 * data['level']
+        self.level_caption.configure(fg=MINT_BRIGHT if voice else MINT if active else MUTED)
         detail = self.error or data['error'] or data['status']
         if active:
             detail = ('● MIC ON · ' + detail)

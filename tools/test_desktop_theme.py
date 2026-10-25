@@ -135,3 +135,75 @@ class GloveThemeTests(unittest.TestCase):
         panel.sensor.snapshot = lambda: sensor_view()
         panel.update()
         self.assertEqual(self.paint(panel.pointer_status, 'fg'), self.colors['MINT'])
+
+
+class InputLevelTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+        except Exception as exc:
+            self.skipTest(f'Tk unavailable: {exc}')
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f'Tk desktop unavailable: {exc}')
+        self.ttk = ttk
+        from desktop_theme import MUTED, MINT, MINT_BRIGHT, LINE, install_theme
+        from speech_panel import SpeechPanel
+        self.root.geometry('480x640')
+        install_theme(self.root)
+        self.colors = {'MUTED': MUTED, 'MINT': MINT, 'MINT_BRIGHT': MINT_BRIGHT, 'LINE': LINE}
+        self.panel = SpeechPanel(self.root, preview=True)
+        self.panel.frame.pack(fill='both', expand=True)
+        self.root.update()
+        self.root.withdraw()
+
+    def tearDown(self):
+        panel = getattr(self, 'panel', None)
+        if panel is not None:
+            panel.close()
+        root = getattr(self, 'root', None)
+        if root is not None:
+            root.destroy()
+
+    def show(self, **overrides):
+        data = {
+            'listening': False, 'error': None, 'status': 'Mic off',
+            'noise_suppression': False, 'latency_ms': None, 'dropped': 0,
+            'level': 0.0, 'voice': False, 'revision': 0, 'text': '',
+        }
+        data.update(overrides)
+        self.panel.controller.snapshot = lambda include_text=True: data
+        self.panel.update()
+
+    def test_meter_is_a_full_row_and_tracks_speech(self):
+        panel = self.panel
+        style = self.ttk.Style(self.root)
+        self.assertEqual(panel.level_caption.cget('text'), 'Input level')
+        self.assertEqual(panel.level_caption.cget('fg'), self.colors['MUTED'])
+        self.assertEqual(panel.level.cget('style'), 'Level.Horizontal.TProgressbar')
+        self.assertEqual(int(style.lookup('Level.Horizontal.TProgressbar', 'thickness')), 12)
+        self.assertEqual(style.lookup('Level.Horizontal.TProgressbar', 'troughcolor'), self.colors['LINE'])
+        self.assertEqual(style.lookup('Level.Horizontal.TProgressbar', 'background'), self.colors['MINT'])
+        self.assertEqual(style.lookup('Level.Voice.Horizontal.TProgressbar', 'background'), self.colors['MINT_BRIGHT'])
+        self.assertEqual(int(style.lookup('Horizontal.TProgressbar', 'thickness')), 5)
+        self.assertGreater(panel.level.winfo_width(), 200)
+        self.assertGreater(panel.level.winfo_rooty(), panel.button.winfo_rooty())
+        bar_mid = panel.level.winfo_rooty() + panel.level.winfo_height() / 2
+        caption_mid = panel.level_caption.winfo_rooty() + panel.level_caption.winfo_height() / 2
+        self.assertLess(abs(bar_mid - caption_mid), 8)
+
+        self.show(listening=True, level=0.4, voice=False)
+        self.assertEqual(panel.level.cget('style'), 'Level.Horizontal.TProgressbar')
+        self.assertAlmostEqual(panel.level['value'], 40)
+        self.assertEqual(panel.level_caption.cget('fg'), self.colors['MINT'])
+
+        self.show(listening=True, level=0.8, voice=True)
+        self.assertEqual(panel.level.cget('style'), 'Level.Voice.Horizontal.TProgressbar')
+        self.assertAlmostEqual(panel.level['value'], 80)
+        self.assertEqual(panel.level_caption.cget('fg'), self.colors['MINT_BRIGHT'])
+
+        self.show(listening=False, level=0, voice=True)
+        self.assertEqual(panel.level.cget('style'), 'Level.Horizontal.TProgressbar')
+        self.assertEqual(panel.level_caption.cget('fg'), self.colors['MUTED'])
