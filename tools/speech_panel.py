@@ -56,9 +56,6 @@ class SpeechPanel:
         self.level_caption.grid(row=0, column=0, sticky='w', padx=(0, 12))
         self.level = ttk.Progressbar(meter, maximum=100, style='Level.Horizontal.TProgressbar')
         self.level.grid(row=0, column=1, sticky='ew')
-        self.noise_enabled = tk.BooleanVar(value=True)
-        self.noise_control = ttk.Checkbutton(self.frame, text='Noise suppression · RNNoise', variable=self.noise_enabled)
-        self.noise_control.grid(row=4, column=0, columnspan=5, sticky='w', pady=(8, 0))
         self.status = tk.Label(self.frame, text='', bg=PANEL, fg=MUTED,
                                font=(FONT, 9), anchor='w', justify='left', wraplength=440)
         self.status.grid(row=5, column=0, columnspan=5, sticky='ew', pady=(4, 10))
@@ -109,7 +106,7 @@ class SpeechPanel:
             return
         try:
             index = max(0, self.device.current())
-            self.controller.start(self.devices[index], noise_suppression=self.noise_enabled.get())
+            self.controller.start(self.devices[index], noise_suppression=False)
             self.error = None
         except Exception:
             self.error = 'Cannot start mic. Check the selected input and local speech dependencies.'
@@ -122,7 +119,6 @@ class SpeechPanel:
         self.button.config(text='Stop mic' if active else 'Start mic', state='disabled' if self.preview else 'normal',
                            style='Danger.TButton' if active else 'Primary.TButton')
         self.device.config(state='disabled' if active or self.preview else 'readonly')
-        self.noise_control.config(state='disabled' if active or self.preview else 'normal')
         for control in self.jarvis_controls + [self.stop_reply, self.new_chat]:
             control.config(state='disabled' if self.preview else 'normal')
         voice = active and data['voice']

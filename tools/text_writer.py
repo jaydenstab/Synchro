@@ -5,6 +5,8 @@ not field contents. No clipboard replacement or window activation is used.
 """
 from dataclasses import dataclass
 import os
+import queue
+from concurrent.futures import Future
 import threading
 
 CHARACTER_INTERVAL = .012
@@ -40,6 +42,7 @@ class WindowsTextBackend:
         import ctypes as c
         from ctypes import wintypes as w
         self.c = c
+        self.comtypes = self.uia = self.automation = None
         self.user32 = c.WinDLL('user32', use_last_error=True)
         self.kernel32 = c.WinDLL('kernel32', use_last_error=True)
         self.user32.GetForegroundWindow.argtypes = []
@@ -103,24 +106,42 @@ class WindowsTextBackend:
             except Exception:
                 return False
 
-    def focused(self):
-        from ctypes import wintypes as w
+    def _ensure_automation(self):
+        if self.automation is not None:
+            return
         try:
             import comtypes
             from comtypes.client import CreateObject, GetModule
         except ImportError:
             raise TextWriteError('Install the speech requirements to enable text-box typing.') from None
         comtypes.CoInitialize()
+        self.comtypes = comtypes
         try:
-            return self._focused_com(CreateObject, GetModule, w)
+            self.uia = GetModule('UIAutomationCore.dll')
+            self.automation = CreateObject('{FF48DBA4-60EF-4201-AA87-54103EEF594E}',
+                                           interface=self.uia.IUIAutomation)
+        except Exception:
+            self.close()
+            raise
+
+    def close(self):
+        # Called on the same dedicated thread that created the COM objects.
+        self.automation = self.uia = None
+        if self.comtypes is not None:
+            self.comtypes.CoUninitialize()
+            self.comtypes = None
+
+    def focused(self):
+        from ctypes import wintypes as w
+        try:
+            self._ensure_automation()
+            return self._focused_com(w)
         except TextWriteError:
             raise
         except Exception:
             raise TextWriteError('Click a supported editable text box before saying Jarvis.') from None
-        finally:
-            comtypes.CoUninitialize()
 
-    def _focused_com(self, create, get_module, w):
+    def _focused_com(self, w):
         hwnd = self.user32.GetForegroundWindow()
         pid = w.DWORD()
         self.user32.GetWindowThreadProcessId(hwnd, self.c.byref(pid))
@@ -130,10 +151,8 @@ class WindowsTextBackend:
                 'cmd.exe', 'powershell.exe', 'pwsh.exe', 'windowsterminal.exe',
                 'openconsole.exe', 'conhost.exe', 'mintty.exe', 'alacritty.exe', 'wezterm-gui.exe'}:
             raise TextWriteError('Choose a document or text box; terminal command inputs are not supported.')
-        uia = get_module('UIAutomationCore.dll')
-        automation = create('{FF48DBA4-60EF-4201-AA87-54103EEF594E}', interface=uia.IUIAutomation)
-        element = automation.GetFocusedElement()
-        if not element or not self._editable(element, uia):
+        element = self.automation.GetFocusedElement()
+        if not element or not self._editable(element, self.uia):
             raise TextWriteError('Click a writable, non-password text box before saying Jarvis.')
         identity = tuple(element.GetRuntimeId())
         if not identity or self.user32.GetForegroundWindow() != hwnd:
@@ -195,6 +214,47 @@ class WindowsTextWriter:
     def __init__(self, backend=None):
         self.backend = backend
         self.lock = threading.RLock()
+        self.jobs = queue.Queue()
+        self.closed = threading.Event()
+        self.thread = None
+
+    def _call(self, operation, *args):
+        with self.lock:
+            if self.closed.is_set():
+                raise TextWriteError('Typing worker is closed.')
+            if self.thread is None:
+                self.thread = threading.Thread(target=self._run, name='synchro-text-input', daemon=True)
+                self.thread.start()
+            result = Future()
+            self.jobs.put((result, operation, args))
+        return result.result()
+
+    def _run(self):
+        try:
+            while True:
+                job = self.jobs.get()
+                if job is None:
+                    return
+                result, operation, args = job
+                try:
+                    if self.closed.is_set():
+                        raise TextWriteError('Typing worker is closed.')
+                    result.set_result(operation(*args))
+                except Exception as error:
+                    result.set_exception(error)
+        finally:
+            if self.backend is not None:
+                close = getattr(self.backend, 'close', None)
+                if close is not None:
+                    close()
+
+    def close(self):
+        with self.lock:
+            if not self.closed.is_set():
+                self.closed.set()
+                self.jobs.put(None)
+        if self.thread is not None:
+            self.thread.join(timeout=1)
 
     def _backend(self):
         if self.backend is None:
@@ -202,43 +262,48 @@ class WindowsTextWriter:
         return self.backend
 
     def capture(self):
-        with self.lock:
-            return self._backend().focused()
+        return self._call(lambda: self._backend().focused())
 
     def _check_target(self, backend, target, cancel):
         if target is None:
             raise TextWriteError('No destination text box was selected when the request started.')
-        if cancel.is_set():
+        if cancel.is_set() or self.closed.is_set():
             raise TextWriteError('Typing cancelled. Any text already inserted remains.')
         interruption = backend.interrupted()
         if interruption:
             raise TextWriteError(interruption)
         if backend.focused() != target:
             raise TextWriteError('Focus changed; typing stopped. The response is still in Jarvis.')
+        if cancel.is_set() or self.closed.is_set():
+            raise TextWriteError('Typing cancelled. Any text already inserted remains.')
 
     def press(self, key, target, cancel):
+        return self._call(self._press, key, target, cancel)
+
+    def _press(self, key, target, cancel):
         if key not in KEY_CHORDS:
             raise TextWriteError('That key combination is not supported.')
-        with self.lock:
-            backend = self._backend()
-            self._check_target(backend, target, cancel)
-            backend.press(key)
+        backend = self._backend()
+        self._check_target(backend, target, cancel)
+        backend.press(key)
 
     def write(self, text, target, cancel):
+        return self._call(self._write, text, target, cancel)
+
+    def _write(self, text, target, cancel):
         if target is None:
             raise TextWriteError('No destination text box was selected when the request started.')
         if not text or len(text) > 12000:
             raise TextWriteError('Writing must contain between 1 and 12,000 characters.')
         if any(ord(char) < 32 and char not in '\r\n\t' for char in text) or '\x7f' in text:
             raise TextWriteError('The writing contains unsupported control characters; it was not typed.')
-        with self.lock:
-            backend = self._backend()
-            # Large bursts of VK_PACKET events can repeat or lose characters in
-            # some editors. Send one complete code point (including surrogate
-            # pairs), release it, and give the target time to process it.
-            for index, character in enumerate(text):
-                if index and cancel.wait(CHARACTER_INTERVAL):
-                    raise TextWriteError('Typing cancelled. Any text already inserted remains.')
-                self._check_target(backend, target, cancel)
-                backend.send(character)
+        backend = self._backend()
+        # Large bursts of VK_PACKET events can repeat or lose characters in
+        # some editors. Send one complete code point (including surrogate
+        # pairs), release it, and give the target time to process it.
+        for index, character in enumerate(text):
+            if index and cancel.wait(CHARACTER_INTERVAL):
+                raise TextWriteError('Typing cancelled. Any text already inserted remains.')
+            self._check_target(backend, target, cancel)
+            backend.send(character)
         return len(text)

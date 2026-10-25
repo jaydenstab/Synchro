@@ -22,7 +22,11 @@ That address belongs to the demo camera; replace it for another unit. Pair
 **Synchro-Cam-BT** in Windows first and obtain its PIN from the owner. Only one
 viewer should connect to the camera at a time. The glove advertises separately
 as **Synchro-Glove**. Auto motion transport prefers a connected Nano USB device,
-then tries BLE. Use `--motion-transport ble` to require BLE explicitly.
+then tries BLE. Use `--motion-transport ble` to require BLE explicitly. A glove
+whose address is already known reconnects directly, without a Bluetooth scan.
+The first search waits while the camera link is up, because a scan uses the
+same laptop radio. A negotiated BLE packet size below 241 bytes is shown on
+the glove status line.
 
 A missing glove or camera leaves its readings empty and reports connection
 status. Camera connection warnings are expected during speech-only use. The
@@ -58,15 +62,31 @@ recognized transcript submits it.
   labeled last frame can still be saved; reconnecting clears stale previews.
 - **Glove:** live roll/pitch/relative yaw, contact states, tap counts, sample rate,
   temperature, calibration progress, and Windows pointer controls.
-- **Speech & Jarvis:** microphone selection, level meter, RNNoise suppression,
-  live transcript, conversation, reply playback, and explicit writing requests.
+- **Speech & Jarvis:** microphone selection, level meter, live transcript,
+  conversation, reply playback, and explicit writing requests. The microphone
+  starts without noise suppression.
 
-Camera readouts show frame-completion rate, request round trip, and resolution.
-The current round-trip measurement includes requesting/receiving the JPEG and
-its decoding; it excludes subsequent UI rendering. It is not exposure time or
-an end-to-end camera-to-screen latency measurement. The current firmware uses
-640×480 JPEG with quality setting 16. Resolution/quality presets and adaptive
-streaming are not implemented. `--fps` is a request-rate cap, not guaranteed FPS.
+Camera readouts show decoded FPS, request-to-decode time, and resolution. When
+the preview widget is updated, the latency readout adds a `show` time from JPEG
+receipt to that update. It includes remaining decode, preview preparation, and
+the Tk image update. It excludes monitor scanout and camera exposure age.
+The FPS cap selector changes the request limit while streaming (5–30 FPS);
+`--fps` sets its initial value and defaults to 15. Higher caps do not guarantee
+higher FPS. One capture may transfer while the previous JPEG decodes. The next
+capture waits while a decode is still busy and another JPEG is already waiting.
+`CAPTURE_ERROR` keeps the Bluetooth session. Five capture failures in a row, a
+broken frame, or two seconds of silence on an open transfer close it. The first
+retry after a session that connected waits 1 second. Connect failures then wait
+2, 4, and 8 seconds. Same-size previews reuse one Tk image. The current firmware
+uses 640×480 JPEG with quality setting 24 and a 16× gain ceiling. Resolution
+presets and adaptive streaming are not implemented.
+
+Jarvis reuses its API client and Windows speech process. Cancelling playback
+terminates the speech process; the next reply starts a fresh one. Rotated cloud
+images are cached per frame and re-encoded at quality 75, still at 640×480.
+Typing uses a dedicated UI Automation worker while retaining focus checks and character
+pacing. See [the latency testing guide](tools/LATENCY_TESTING.md) for regression
+commands, a local JPEG benchmark, and Windows/hardware acceptance steps.
 
 Conversation context lasts until New chat or app shutdown. Read aloud uses the
 Windows voice. Every Jarvis request goes to Gemini, including exact dictation and
@@ -102,11 +122,11 @@ See [firmware/MOTION.md](firmware/MOTION.md) for behavior and limitations.
 
 ## Speech, Jarvis, and data handling
 
-Speech uses local Parakeet v2, Silero VAD, and optional RNNoise suppression.
-The first microphone start downloads roughly 664 MB of model weights; later
-starts use the cache. Allow microphone access when prompted, speak, and pause
-to see the transcript. Stop the microphone before changing its input or noise
-suppression. See [firmware/SPEECH.md](firmware/SPEECH.md).
+Speech uses local Parakeet v2 and Silero VAD. The microphone starts without
+RNNoise. The first microphone start downloads roughly 664 MB of model weights;
+later starts use the cache. Allow microphone access when prompted, speak, and
+pause to see the transcript. Stop the microphone before changing its input.
+See [firmware/SPEECH.md](firmware/SPEECH.md).
 
 Jarvis listening, read-aloud, and typing preferences are checked by default;
 the microphone still starts off. Uncheck **Listen for Jarvis** to use local
@@ -173,7 +193,9 @@ not establish radio performance, recognition accuracy, or accessibility for a
 particular user. Windows-only/native-library checks may be skipped on Mac.
 
 - **Camera unavailable:** check power, pairing, address/channel, and other open
-  viewers. Use `-Console` for logs. Pairing the glove does not pair the camera.
+  viewers. The camera keeps one Bluetooth session; after a drop it releases
+  that session and the app reconnects. Use `-Console` for logs. Pairing the
+  glove does not pair the camera.
 - **No glove readings:** check firmware/wiring and the selected transport. For
   USB, use a data cable and `--mpu-port COM5` with the actual port; for multiple
   BLE gloves use `--mpu-ble-address` with the intended device address.
@@ -181,8 +203,7 @@ particular user. Windows-only/native-library checks may be skipped on Mac.
   keep the board still. Recalibrate after replacing the sensor or changing its
   mounting; yaw remains relative and can drift.
 - **Microphone fails:** check Windows microphone permissions and the selected
-  input, install requirements, or stop the mic and disable RNNoise if its native
-  library cannot load. Speech and camera connections are independent.
+  input, or install requirements. Speech and camera connections are independent.
 - **Jarvis fails:** check the key/internet and the visible error. Camera questions
   need a live frame; general writing can work without one. If no request starts,
   check Listen for Jarvis and the recognized terminal punctuation.
@@ -221,8 +242,8 @@ credentials, media, model caches, environments, and build outputs; the receiving
 computer must install dependencies and supply its own credentials.
 
 Next acceptance task: install on a clean Windows computer and verify DPI/layout,
-USB/BLE reconnects, calibration, pointer dragging/scrolling/pause, microphone and
-RNNoise, Jarvis playback/cancellation, and typing into a selected test field.
+USB/BLE reconnects, calibration, pointer dragging/scrolling/pause, microphone,
+Jarvis playback/cancellation, and typing into a selected test field.
 Historical hardware measurements are recorded separately from current software
 checks in HANDOFF.md. Battery runtime, long-term drift, and wearable comfort
 remain uncharacterized. Dwell click, drag lock, personalized movement ranges,

@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <atomic>
+#include <cstring>
+#include "esp_bt.h"
+#include "esp_gap_bt_api.h"
 #include "esp_camera.h"
 #include "secrets.h"
 
@@ -17,6 +20,11 @@ uint16_t sensorPid = 0;
 uint32_t sentFrames = 0, captureFailures = 0;
 std::atomic<uint8_t> bluetoothChannel{0};
 std::atomic<bool> resetBluetoothCommand{false};
+std::atomic<bool> releaseClient{false};
+std::atomic<bool> reopenRadio{false};
+std::atomic<bool> announceOpen{false};
+std::atomic<bool> announceClose{false};
+std::atomic<uint32_t> lastRxMs{0};
 String usbCommand, bluetoothCommand, bluetoothAddress;
 
 String statusJson() {
@@ -42,7 +50,9 @@ bool startCamera() {
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
   config.frame_size = FRAMESIZE_VGA;
-  config.jpeg_quality = 16;
+  // 0 is largest, 63 is smallest. 24 stays at 640x480 and keeps a settled
+  // indoor frame from growing into a one-second transfer.
+  config.jpeg_quality = 24;
   config.fb_count = psramFound() ? 2 : 1;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   config.grab_mode = CAMERA_GRAB_LATEST;
@@ -54,6 +64,27 @@ bool startCamera() {
     sensor->set_vflip(sensor, 1);
     sensor->set_brightness(sensor, 1);
     sensor->set_saturation(sensor, -2);
+    // -2..2. One step above the driver default; denoise 0 keeps edges from being smoothed away.
+    if (sensor->set_sharpness) sensor->set_sharpness(sensor, 1);
+    if (sensor->set_denoise) sensor->set_denoise(sensor, 0);
+  }
+  // Automatic gain otherwise climbs for several seconds and the JPEG swells.
+  // The first frames stay near 4–5 fps; later frames then fall toward 1 fps.
+  if (sensor->set_gainceiling) sensor->set_gainceiling(sensor, GAINCEILING_16X);
+  return true;
+}
+
+bool writeAll(Print &output, const uint8_t *data, size_t length) {
+  // BluetoothSerial mallocs each write in internal RAM, then sends it in
+  // 330-byte pieces. One full-frame copy fragments that heap once exposure
+  // settles. Small chunks are freed as the radio drains them.
+  const size_t chunk = 512;
+  while (length > 0) {
+    size_t step = length < chunk ? length : chunk;
+    size_t wrote = output.write(data, step);
+    if (wrote == 0) return false;
+    data += wrote;
+    length -= wrote;
   }
   return true;
 }
@@ -72,21 +103,21 @@ void sendPhoto(Print &output) {
   int headerSize = snprintf(header, sizeof(header), "JPEG_BEGIN %u %u %u\n",
     static_cast<unsigned>(frame->len), static_cast<unsigned>(frame->width), static_cast<unsigned>(frame->height));
   const char tail[] = "\nJPEG_END\n";
-  // Queue one complete response, so header/body/trailer cannot interleave.
-  size_t packetSize = headerSize + frame->len + sizeof(tail) - 1;
-  uint8_t *packet = static_cast<uint8_t *>(ps_malloc(packetSize));
-  if (!packet) packet = static_cast<uint8_t *>(malloc(packetSize));
-  if (!packet) {
-    esp_camera_fb_return(frame); captureFailures++;
-    output.println("CAPTURE_ERROR"); return;
-  }
-  memcpy(packet, header, headerSize);
-  memcpy(packet + headerSize, frame->buf, frame->len);
-  memcpy(packet + headerSize + frame->len, tail, sizeof(tail) - 1);
+  // Each chunk is copied by BluetoothSerial. Return this buffer once those
+  // copies are queued so the other buffer can keep capturing.
+  bool ok = writeAll(output, reinterpret_cast<const uint8_t *>(header), headerSize)
+      && writeAll(output, frame->buf, frame->len)
+      && writeAll(output, reinterpret_cast<const uint8_t *>(tail), sizeof(tail) - 1);
   esp_camera_fb_return(frame);
-  if (output.write(packet, packetSize) == packetSize) sentFrames++;
-  else captureFailures++;
-  free(packet);
+  if (ok) {
+    sentFrames++;
+    lastRxMs.store(millis());
+  } else {
+    captureFailures++;
+    // A failed send usually means the laptop is already gone. This stack
+    // keeps that one client slot until something disconnects it.
+    releaseClient = true;
+  }
 }
 
 void processCommands(Stream &input, String &command) {
@@ -107,9 +138,43 @@ void processCommands(Stream &input, String &command) {
   }
 }
 
+void onGapEvent(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+  // Core 2.0.17 answers every PIN request with 1234. Pairing then fails
+  // whenever secrets.h uses a different PIN, so this callback replaces that reply.
+  if (event == ESP_BT_GAP_PIN_REQ_EVT) {
+    esp_bt_pin_code_t pin = {};
+    uint8_t length = strlen(BT_PAIRING_PIN);
+    if (length > ESP_BT_PIN_CODE_LEN) length = ESP_BT_PIN_CODE_LEN;
+    memcpy(pin, BT_PAIRING_PIN, length);
+    bool accept = !(param->pin_req.min_16_digit && length < 16);
+    esp_bt_gap_pin_reply(param->pin_req.bda, accept, accept ? length : 0, accept ? pin : nullptr);
+  } else if (event == ESP_BT_GAP_CFM_REQ_EVT) {
+    esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+  } else if (event == ESP_BT_GAP_KEY_REQ_EVT) {
+    uint32_t passkey = 0;
+    bool numeric = BT_PAIRING_PIN[0];
+    for (const char *digit = BT_PAIRING_PIN; *digit; ++digit) {
+      if (*digit < '0' || *digit > '9' || passkey > 99999) { numeric = false; break; }
+      passkey = passkey * 10u + static_cast<uint32_t>(*digit - '0');
+    }
+    esp_bt_gap_ssp_passkey_reply(param->key_req.bda, numeric, numeric ? passkey : 0);
+  } else if (event == ESP_BT_GAP_AUTH_CMPL_EVT) {
+    Serial.printf("BT_AUTH %s\n", param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS ? "true" : "false");
+  }
+}
+
 void onBluetoothEvent(esp_spp_cb_event_t event, esp_spp_cb_param_t *param) {
   if (event == ESP_SPP_START_EVT) bluetoothChannel = param->start.scn;
-  if (event == ESP_SPP_CLOSE_EVT || event == ESP_SPP_SRV_OPEN_EVT) resetBluetoothCommand = true;
+  if (event == ESP_SPP_SRV_OPEN_EVT) {
+    resetBluetoothCommand = true;
+    lastRxMs.store(millis());
+    announceOpen = true;
+  }
+  if (event == ESP_SPP_CLOSE_EVT) {
+    resetBluetoothCommand = true;
+    reopenRadio = true;
+    announceClose = true;
+  }
 }
 
 void setup() {
@@ -120,19 +185,42 @@ void setup() {
   Serial.println("\nSYNCHRO_CAM_BLUETOOTH_BOOT v2");
   cameraReady = startCamera();
   SerialBT.register_callback(onBluetoothEvent);
-  SerialBT.onAuthComplete([](boolean success) { Serial.printf("BT_AUTH %s\n", success ? "true" : "false"); });
+  SerialBT.setPin(BT_PAIRING_PIN);
   bluetoothReady = SerialBT.begin(BT_NAME);
   if (bluetoothReady) {
-    SerialBT.setPin(BT_PAIRING_PIN);
+    esp_err_t gap = esp_bt_gap_register_callback(onGapEvent);
+    Serial.printf("BT_PIN %s\n", gap == ESP_OK ? "custom" : "default");
     bluetoothAddress = SerialBT.getBtAddressString();
+    lastRxMs.store(millis());
+    // Keep the controller awake so Windows can page the camera after a drop.
+    // Sniff mode itself has no public switch in this core.
+    esp_err_t sleep = esp_bt_sleep_disable();
+    esp_err_t power = esp_bredr_tx_power_set(ESP_PWR_LVL_P9, ESP_PWR_LVL_P9);
+    Serial.printf("BT_SLEEP %s\n", sleep == ESP_OK ? "off" : "unavailable");
+    Serial.printf("BT_POWER %s\n", power == ESP_OK ? "9dBm" : "unavailable");
   }
   Serial.println(statusJson());
   Serial.println("COMMANDS STATUS CAPTURE");
 }
 
 void loop() {
+  if (announceOpen.exchange(false)) Serial.println("BT_CLIENT open");
+  if (announceClose.exchange(false)) Serial.println("BT_CLIENT closed");
+  if (reopenRadio.exchange(false)) {
+    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+    Serial.println("BT_LISTEN");
+  }
   if (resetBluetoothCommand.exchange(false)) bluetoothCommand = "";
   processCommands(Serial, usbCommand);
-  if (bluetoothReady) processCommands(SerialBT, bluetoothCommand);
+  if (bluetoothReady) {
+    if (SerialBT.available()) lastRxMs.store(millis());
+    processCommands(SerialBT, bluetoothCommand);
+    bool stale = SerialBT.hasClient() && millis() - lastRxMs.load() > 12000;
+    if (releaseClient.exchange(false) || stale) {
+      Serial.println(stale ? "BT_RELEASE idle" : "BT_RELEASE send");
+      SerialBT.disconnect();
+      lastRxMs.store(millis());
+    }
+  }
   delay(1);
 }

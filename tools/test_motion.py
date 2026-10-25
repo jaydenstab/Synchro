@@ -1,10 +1,14 @@
 """Synthetic numerical/protocol regressions; these do NOT calibrate hardware."""
+import asyncio
 import math
 import json
 from pathlib import Path
+import queue
 import struct
 import tempfile
+import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -12,7 +16,8 @@ import zlib
 
 from motion_core import (MAGIC, HEADER, SAMPLE, Orientation, PacketReader,
                          calibration_report, scaled)
-from motion_sensor import MotionSensor
+from motion_ble import BleStream, FULL_PACKET_MTU
+from motion_sensor import MotionSensor, ble_retry_seconds, ble_scan_blocked
 
 
 def make_packet(rows=((0, 0, 8192, 0, 0, 0),), contacts=0, left=0, right=0, count=None):
@@ -202,6 +207,113 @@ class ControlTests(unittest.TestCase):
                 finally:
                     sensor.server.shutdown()
                     sensor.server.server_close()
+
+
+class BluetoothCoexistenceTests(unittest.TestCase):
+    def test_discovery_waits_for_the_camera_and_a_known_address_does_not(self):
+        radio = threading.Event()
+        self.assertFalse(ble_scan_blocked('20:6E:F1:31:64:3D', radio))
+        self.assertFalse(ble_scan_blocked(None, None))
+        radio.set()
+        self.assertFalse(ble_scan_blocked('20:6E:F1:31:64:3D', radio))
+        self.assertTrue(ble_scan_blocked(None, radio))
+        radio.clear()
+        self.assertFalse(ble_scan_blocked(None, radio))
+        self.assertEqual(FULL_PACKET_MTU, 241)
+
+    def test_ble_retries_back_off_only_while_the_camera_holds_the_radio(self):
+        self.assertEqual([ble_retry_seconds(True, attempt) for attempt in range(4)], [2, 4, 8, 8])
+        self.assertEqual(ble_retry_seconds(False, 3), 1)
+
+    def stream(self, address):
+        stream = BleStream.__new__(BleStream)
+        stream.stopped = threading.Event()
+        stream.parent_stop = threading.Event()
+        stream.started = threading.Event()
+        stream.address = address
+        stream.expected_identity = None
+        stream.blocks = queue.Queue()
+        stream.error = None
+        stream.info = None
+        stream.mtu = None
+        return stream
+
+    def client(self, created, mtu=247):
+        parent = self
+
+        class Client:
+            def __init__(self, device, timeout=None, services=None):
+                created.append(device)
+                self.mtu_size = mtu
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def read_gatt_char(self, uuid):
+                return b'206EF131643D'
+
+            async def start_notify(self, uuid, callback):
+                parent.notified = uuid
+
+            async def stop_notify(self, uuid):
+                pass
+
+            @property
+            def is_connected(self):
+                return True
+
+        return Client
+
+    def run_connect(self, stream, client, scanner):
+        async def release(_delay):
+            stream.parent_stop.set()
+
+        with patch('bleak.BleakClient', client), patch('bleak.BleakScanner', scanner), \
+             patch('motion_ble.asyncio.sleep', release):
+            asyncio.run(stream._connect())
+
+    def test_known_glove_connects_without_scanning(self):
+        created = []
+        scanner = SimpleNamespace(
+            discover=self.fail_async('discovery scan'),
+            find_device_by_address=self.fail_async('address scan'))
+        stream = self.stream('20:6E:F1:31:64:3D')
+        self.run_connect(stream, self.client(created), scanner)
+        self.assertEqual(created, ['20:6E:F1:31:64:3D'])
+        self.assertEqual(stream.info.device, '20:6E:F1:31:64:3D')
+        self.assertEqual(stream.info.serial_number, '206EF131643D')
+        self.assertEqual(stream.mtu, 247)
+
+    def test_unknown_glove_scans_once_and_refuses_an_ambiguous_pair(self):
+        device = SimpleNamespace(address='AA:BB:CC:DD:EE:FF')
+        calls = []
+
+        async def discover(timeout=None, service_uuids=None):
+            calls.append(service_uuids)
+            return [device]
+
+        created = []
+        stream = self.stream(None)
+        self.run_connect(stream, self.client(created, mtu=23), SimpleNamespace(discover=discover))
+        self.assertEqual(calls, [['8870a001-49a5-4a7c-8d92-a1f003b7d601']])
+        self.assertIs(created[0], device)
+        self.assertEqual(stream.mtu, 23)
+        self.assertEqual(stream.info.device, device.address)
+
+        async def ambiguous(timeout=None, service_uuids=None):
+            return [device, device]
+
+        with self.assertRaises(OSError) as error:
+            self.run_connect(self.stream(None), self.client([]), SimpleNamespace(discover=ambiguous))
+        self.assertIn('Multiple gloves', str(error.exception))
+
+    def fail_async(self, label):
+        async def fail(*args, **kwargs):
+            raise AssertionError(label)
+        return fail
 
 
 if __name__ == '__main__':

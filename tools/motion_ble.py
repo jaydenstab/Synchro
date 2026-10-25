@@ -8,6 +8,8 @@ from types import SimpleNamespace
 SERVICE_UUID = '8870a001-49a5-4a7c-8d92-a1f003b7d601'
 DATA_UUID = '8870a002-49a5-4a7c-8d92-a1f003b7d601'
 IDENTITY_UUID = '8870a003-49a5-4a7c-8d92-a1f003b7d601'
+# A full SYNIMU1 notification is at most 238 bytes, which needs ATT payload room.
+FULL_PACKET_MTU = 241
 
 
 class BleStream:
@@ -43,24 +45,27 @@ class BleStream:
 
     async def _connect(self):
         from bleak import BleakClient, BleakScanner
+        # A known address connects directly. Scanning inquires the same laptop
+        # radio the camera is using for Classic video.
         if self.address:
-            device = await BleakScanner.find_device_by_address(self.address, timeout=6)
+            target, address = self.address, self.address
         else:
             devices = await BleakScanner.discover(timeout=4, service_uuids=[SERVICE_UUID])
             if len(devices) > 1:
                 raise OSError('Multiple gloves found; choose one with --mpu-ble-address.')
             device = devices[0] if devices else None
-        if device is None:
-            raise OSError('Synchro-Glove not found. Power the Nano and enable laptop Bluetooth.')
+            if device is None:
+                raise OSError('Synchro-Glove not found. Power the Nano and enable laptop Bluetooth.')
+            target, address = device, device.address
         if self.stopped.is_set() or self.parent_stop.is_set():
             return
-        async with BleakClient(device, timeout=12, services=[SERVICE_UUID]) as client:
+        async with BleakClient(target, timeout=12, services=[SERVICE_UUID]) as client:
             identity = bytes(await client.read_gatt_char(IDENTITY_UUID)).decode('ascii')
             if not re.fullmatch(r'[0-9A-Fa-f]{12}', identity):
                 raise OSError('Unexpected glove identity')
             if self.expected_identity and identity.upper() != self.expected_identity.upper():
                 raise OSError('BLE glove is not the Nano previously connected over USB.')
-            self.info = SimpleNamespace(device=device.address, serial_number=identity.upper())
+            self.info = SimpleNamespace(device=address, serial_number=identity.upper())
             self.mtu = client.mtu_size
 
             def receive(characteristic, data):

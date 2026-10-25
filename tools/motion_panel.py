@@ -5,14 +5,15 @@ from tkinter import ttk
 from desktop_theme import (FONT, PANEL, INSET, TEXT, MUTED, MINT, WARN, DANGER,
                            CHIP, SELECT, SELECT_TEXT, heading, wrap_labels)
 
+from motion_ble import FULL_PACKET_MTU
 from motion_sensor import MotionSensor
 from motion_pointer import PointerController
 
 
 class MotionPanel:
-    def __init__(self, root, port=None, transport='auto', ble_address=None, connect=True):
+    def __init__(self, root, port=None, transport='auto', ble_address=None, connect=True, radio_hold=None):
         self.connect = connect
-        self.sensor = MotionSensor(port, transport, ble_address)
+        self.sensor = MotionSensor(port, transport, ble_address, radio_hold)
         self.frame = tk.Frame(root, bg=PANEL, padx=18, pady=18)
         for column in range(3):
             self.frame.columnconfigure(column, weight=1)
@@ -142,6 +143,9 @@ class MotionPanel:
         if data['fresh'] and data['ready']:
             message = (f"{data.get('transport', 'USB')}  ·  {data['sample_hz']:.0f} samples/s  ·  "
                        f"{data['temperature_c']:.1f} °C  ·  {data['tracking_restarts']} tracking restarts")
+            # Fragmented notifications steal airtime from the camera's Classic link.
+            if data.get('ble_mtu') is not None and data['ble_mtu'] < FULL_PACKET_MTU:
+                message += f"  ·  BLE MTU {data['ble_mtu']}"
         self.status.config(text=message)
         cal = data['calibration']
         busy = cal['state'] in ('queued', 'running', 'saving')

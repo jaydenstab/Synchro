@@ -237,8 +237,9 @@ References: [Espressif CameraWebServer](https://github.com/espressif/arduino-esp
 `esp32:esp32:esp32cam:FlashMode=dio,FlashFreq=40` configuration. It runs Bluetooth
 Classic SPP with Wi-Fi off, and advertises `Synchro-Cam-BT`. Its pairing PIN
 is in its ignored `secrets.h`; create it using `secrets.example.h` for a new
-setup. Bluetooth firmware v2 uses 640×480 JPEG, with the same JPEG quality
-setting (16) as v1. The viewer accepts both the original 320×240 frames and
+setup. Bluetooth firmware keeps 640×480. JPEG quality is 24 on the camera's
+0–63 scale, and automatic gain stops at 16× so a settled exposure cannot
+inflate later frames. v1 used 320×240 at quality 16. The viewer accepts both the original 320×240 frames and
 640×480 frames, and displays their actual dimensions. The Nano needs no
 firmware change. The working 320×240 firmware and viewer are preserved in
 `.local/camera-bluetooth-qvga-baseline`.
@@ -248,6 +249,14 @@ putting the camera into programming mode. Then power off, remove IO0–GND,
 and reconnect USB. Run `tools/Get-Bluetooth-Camera.ps1` to verify the
 firmware and save its real Bluetooth address/channel to
 `.local/bluetooth-camera.json`.
+
+The camera accepts one Classic Bluetooth client. Arduino core 2.0.17 answers
+a PIN request with `1234`; this sketch replaces that reply with the PIN in
+`secrets.h`. After a failed send, or 12 seconds without a command, the camera
+drops that client and becomes connectable again. The viewer waits 8 seconds
+after a session that opened before dialing again, and 2 seconds when the
+camera never answered. Bluetooth controller sleep is disabled so a later page
+from Windows can still find the camera.
 
 `tools/pair_bluetooth_camera.py` uses the Windows Bluetooth pairing API
 with the configured PIN and only the camera address obtained from USB.

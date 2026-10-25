@@ -23,16 +23,21 @@ class DesktopViewerTests(unittest.TestCase):
         import threading
         import time
         from PIL import Image, ImageTk
-        from bluetooth_viewer import Frame
+        from bluetooth_viewer import ReceivedJPEG
         import tkinter as tk
         from tkinter import ttk
-        from bluetooth_viewer import launch_viewer
+        from bluetooth_viewer import launch_viewer, FrameRate
         from motion_sensor import MotionSensor
         from motion_pointer import PointerController
         import speech_stream  # Load optional compiled dependencies before the module sandbox.
 
         errors = []
         observations = []
+        rate_changes = []
+        original_set_rate = FrameRate.set
+        def set_rate(rate, value):
+            original_set_rate(rate, value)
+            rate_changes.append(rate.get())
 
         def walk(widget):
             yield widget
@@ -58,6 +63,13 @@ class DesktopViewerTests(unittest.TestCase):
                                 self.assertGreaterEqual(widget.winfo_rootx(), root.winfo_rootx(), str(widget))
                                 self.assertLessEqual(right, root.winfo_rootx() + root.winfo_width(), str(widget))
                                 self.assertLessEqual(bottom, root.winfo_rooty() + root.winfo_height(), str(widget))
+                cap = next(w for w in walk(root) if isinstance(w, ttk.Combobox)
+                           and '30' in w.cget('values'))
+                self.assertEqual(cap.get(), '15')
+                cap.set('30')
+                cap.event_generate('<<ComboboxSelected>>')
+                root.update()
+                self.assertEqual(rate_changes[-1], 30)
                 observations.extend(notebook.tab(tab, 'text') for tab in notebook.tabs())
                 from desktop_theme import BANNER, BANNER_TEXT, CHIP, MUTED, PANEL
                 motion_frame = root.nametowidget(notebook.tabs()[0])
@@ -89,9 +101,9 @@ class DesktopViewerTests(unittest.TestCase):
                     root.update()
                     self.assertGreater(root.nametowidget(tab).winfo_height(), 60)
                 checks = {w.cget('text'): w for w in walk(root) if isinstance(w, ttk.Checkbutton)}
-                for name in ('Listen for Jarvis', 'Read aloud', 'Typing & keys',
-                             'Noise suppression · RNNoise', 'Rotate 180°'):
+                for name in ('Listen for Jarvis', 'Read aloud', 'Typing & keys', 'Rotate 180°'):
                     self.assertIn(name, checks)
+                self.assertNotIn('Noise suppression · RNNoise', checks)
                 self.assertNotIn('Show motion and cursor controls', checks)
                 for tab in notebook.tabs():
                     self.assertEqual(notebook.tab(tab, 'state'), 'normal')
@@ -110,7 +122,6 @@ class DesktopViewerTests(unittest.TestCase):
                 if not preview:
                     checks['Read aloud'].invoke()
                     configure.assert_called_with(enabled=True, read_aloud=False, type_writes=True)
-                    checks['Noise suppression · RNNoise'].invoke()
                     buttons['Start mic'].invoke()
                     speech_start.assert_called_once_with(None, noise_suppression=False)
                     buttons['Stop reply'].invoke()
@@ -138,12 +149,16 @@ class DesktopViewerTests(unittest.TestCase):
             image_threads.append(threading.get_ident())
             return real_photo(*args, **kwargs)
         picture = Image.new('RGB', (640, 480), '#42785e')
+        from io import BytesIO
+        output = BytesIO()
+        picture.save(output, format='JPEG')
         def capture():
-            return Frame(b'fixture-only', picture, .01, time.perf_counter())
+            now = time.perf_counter()
+            return ReceivedJPEG(output.getvalue(), 640, 480, now - .01, now)
         with patch.dict('sys.modules', {'sounddevice': SimpleNamespace(query_devices=query_devices)}), \
-             patch.object(tk.Tk, 'mainloop', loop), \
+             patch.object(tk.Tk, 'mainloop', loop), patch.object(FrameRate, 'set', set_rate), \
              patch('bluetooth_viewer.Camera.connect', side_effect=None if live_camera else OSError('No camera attached')) as camera_connect, \
-             patch('bluetooth_viewer.Camera.capture', side_effect=capture), \
+             patch('bluetooth_viewer.Camera.receive_jpeg', side_effect=capture), \
              patch('PIL.ImageTk.PhotoImage', side_effect=make_photo), \
              patch.object(MotionSensor, 'start') as sensor_start, patch.object(MotionSensor, 'close'), \
              patch.object(PointerController, 'start') as pointer_start, \
@@ -165,7 +180,8 @@ class DesktopViewerTests(unittest.TestCase):
                 speak.assert_not_called()
                 write.assert_not_called()
                 configure.assert_not_called()
-        self.assertTrue(image_threads)
+        if live_camera:
+            self.assertTrue(image_threads)
         self.assertTrue(all(thread == main_thread for thread in image_threads), 'Tk images must only be created on main')
         if errors:
             raise errors[0]

@@ -22,6 +22,18 @@ CONTROL_FILE = PROJECT / '.local' / 'motion-control.json'
 PROFILE_SCHEMA = 'mpu6050-4g-500dps-98hz-1000hz-v1'
 
 
+def ble_scan_blocked(address, radio_hold):
+    """A discovery scan waits. A pinned glove address does not need one."""
+    return not address and radio_hold is not None and radio_hold.is_set()
+
+
+def ble_retry_seconds(radio_busy, attempt):
+    """Back off BLE reconnects while the camera holds the laptop radio."""
+    if radio_busy:
+        return min(8, 2 ** min(max(0, attempt) + 1, 3))
+    return 1
+
+
 def atomic_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + '.tmp')
@@ -30,10 +42,11 @@ def atomic_json(path, value):
 
 
 class MotionSensor:
-    def __init__(self, port=None, transport='auto', ble_address=None):
+    def __init__(self, port=None, transport='auto', ble_address=None, radio_hold=None):
         self.requested_port = port
         self.transport = transport
         self.ble_address = ble_address
+        self.radio_hold = radio_hold
         self.stop_event = threading.Event()
         self.commands = queue.Queue()
         self.lock = threading.Lock()
@@ -44,7 +57,8 @@ class MotionSensor:
                       'calibrated': False, 'bias_dps': [0.0] * 3,
                       'calibration': {'state': 'idle', 'progress': 0.0},
                       'tracking_restarts': 0, 'orientation_version': 0, 'received_at': 0.0,
-                      'last_orientation_reset': None, 'range_exceeded': False, 'clipped_samples': 0}
+                      'last_orientation_reset': None, 'range_exceeded': False, 'clipped_samples': 0,
+                      'ble_mtu': None}
         self.pointer = None
         self.speech = None
         self.assistant = None
@@ -198,8 +212,10 @@ class MotionSensor:
         except ImportError:
             self._set(status='Install pyserial to read the Nano: python -m pip install pyserial')
             return
+        ble_attempt = 0
         while not self.stop_event.is_set():
             connection = None
+            used_ble = False
             try:
                 ports = list(list_ports.comports())
                 matches = [p for p in ports if p.device == self.requested_port] if self.requested_port else [
@@ -222,15 +238,23 @@ class MotionSensor:
                 else:
                     if self.transport == 'usb' or self.requested_port:
                         raise ValueError('Connect the Nano directly to laptop USB.')
+                    if ble_scan_blocked(self.ble_address, self.radio_hold):
+                        self._set(connected=False, ready=False, angles=None, ble_mtu=None,
+                                  status='Camera is using Bluetooth. Glove scan resumes when the camera link is free.')
+                        self.stop_event.wait(0.2)
+                        continue
                     from motion_ble import BleStream
                     self._set(status='Looking for Synchro-Glove over Bluetooth LE...')
+                    used_ble = True
                     connection = BleStream(self.stop_event, self.ble_address, self.sensor_id)
                     info = connection.info
                     transport_name = 'Bluetooth LE'
                     # Pin reconnections to this glove, including after USB is unplugged.
                     self.ble_address = info.device
+                    ble_attempt = 0
                 self._load_profile(info)
                 self._set(connected=True, port=info.device, transport=transport_name,
+                          ble_mtu=getattr(connection, 'mtu', None),
                           status='Waiting for angle firmware...')
                 reader = PacketReader()
                 previous = None
@@ -313,11 +337,22 @@ class MotionSensor:
                         self._fail_calibration('Calibration timed out; check USB and the sensor.')
             except (OSError, ValueError, serial.SerialException) as error:
                 self._fail_calibration(str(error))
-                self._set(connected=False, ready=False, angles=None, status=str(error), received_at=0.0)
+                self._set(connected=False, ready=False, angles=None, ble_mtu=None,
+                          status=str(error), received_at=0.0)
             finally:
                 if connection is not None:
                     connection.close()
-            self.stop_event.wait(1)
+            if self.stop_event.is_set():
+                break
+            radio_busy = self.radio_hold is not None and self.radio_hold.is_set()
+            if used_ble and radio_busy:
+                delay = ble_retry_seconds(True, ble_attempt)
+                ble_attempt += 1
+            else:
+                delay = 1
+                if not radio_busy:
+                    ble_attempt = 0
+            self.stop_event.wait(delay)
 
     def _start_control_server(self):
         sensor = self

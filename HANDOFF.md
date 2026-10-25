@@ -26,8 +26,8 @@ The `main` branch is the Windows implementation from hardware baseline `test`
 commit `721891c2278a04de3098fd94961e0acaa670fd8e`, with the native Tk UI redesigned.
 Camera is beside permanent Glove and Speech & Jarvis tabs. The UI uses a shared
 theme, themed scrollbars, grouped readouts, and a single preview banner. Jarvis,
-RNNoise, microphone selection, pointer controls, photo saving, and both transcript
-views are retained. `--pause-pointer` selects Speech & Jarvis without hiding Glove.
+microphone selection, pointer controls, photo saving, and both transcript
+views are retained. The microphone starts without RNNoise. `--pause-pointer` selects Speech & Jarvis without hiding Glove.
 
 Mac is a development host only: `tools/bluetooth_viewer.py --preview` uses the
 actual widgets but opens no hardware, audio, cloud, playback, or typing actions.
@@ -307,7 +307,7 @@ Observed on the owner's Windows laptop:
 Next acceptance task: on a clean Windows computer, install requirements and
 run the app without --preview. Check fonts/DPI, both permanent tabs, camera
 start/stop/photo saving, USB/BLE connect and recovery, warmup/calibration,
-neutral position, dragging/scrolling/pause, microphone selection/RNNoise,
+neutral position, dragging/scrolling/pause, microphone selection,
 Jarvis replies/read-aloud/cancellation, and explicit writing into a selected
 test field. Record live results separately from automated fixtures.
 

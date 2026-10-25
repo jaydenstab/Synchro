@@ -142,7 +142,7 @@ class SpeechController:
         if self.assistant is not None:
             self.assistant.cancel('Mic stopped. Start mic, then say Jarvis.')
 
-    def start(self, device=None, noise_suppression=True):
+    def start(self, device=None, noise_suppression=False):
         import sounddevice as sd
         if self.snapshot()['listening']:
             return
@@ -158,7 +158,7 @@ class SpeechController:
         threading.Thread(target=self._session,
                          args=(generation, stop, clear, device, noise_suppression), daemon=True).start()
 
-    def _session(self, generation, stop, clear, device, noise_suppression=True):
+    def _session(self, generation, stop, clear, device, noise_suppression=False):
         # Serialize restarts and cache the models. A stopped inference may finish
         # internally, but cannot publish text or open a second microphone.
         while not self.session_lock.acquire(timeout=.1):
@@ -191,7 +191,7 @@ class SpeechController:
                 capture.join()  # Release RawInputStream before allowing restart.
             self.session_lock.release()
 
-    def _capture(self, generation, stop, clear, clips, device, vad, noise_suppression=True):
+    def _capture(self, generation, stop, clear, clips, device, vad, noise_suppression=False):
         import numpy as np
         import sounddevice as sd
         raw = queue.Queue(maxsize=100)

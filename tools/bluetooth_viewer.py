@@ -4,10 +4,12 @@ from collections import deque
 from dataclasses import dataclass
 from io import BytesIO
 import json
+import math
 from pathlib import Path
 import queue
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -18,6 +20,12 @@ from camera_preview import PreviewRenderer
 
 CAMERA_REFRESH_MS = 10
 CONTROL_REFRESH_MS = 30
+CAMERA_RETRY_SECONDS = 2
+CAMERA_RECOVER_SECONDS = 8
+CAMERA_LINGER_SECONDS = 1
+CONNECT_TIMEOUT_SECONDS = 12
+FRAME_STALL_SECONDS = 2
+CAPTURE_SKIP_LIMIT = 5
 
 PROJECT = Path(__file__).resolve().parents[1]
 CONFIG = PROJECT / '.local' / 'bluetooth-camera.json'
@@ -66,6 +74,200 @@ class Frame:
     image: Image.Image
     seconds: float
     received_at: float
+    transfer_seconds: float = 0.0
+    decode_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class ReceivedJPEG:
+    jpeg: bytes
+    width: int
+    height: int
+    began_at: float
+    received_at: float
+
+
+def decode_jpeg(packet):
+    began = time.perf_counter()
+    with Image.open(BytesIO(packet.jpeg)) as decoded:
+        if decoded.size != (packet.width, packet.height):
+            raise ProtocolError('JPEG dimensions do not match its header')
+        decoded.load()
+        picture = decoded.convert('RGB')
+    now = time.perf_counter()
+    return Frame(packet.jpeg, picture, now - packet.began_at, packet.received_at,
+                 packet.received_at - packet.began_at, now - began)
+
+
+class FrameDecoder:
+    """One busy decode and one replaceable pending JPEG, scoped to a connection.
+
+    A capture may transfer while this decode runs. The receiver waits when that
+    pending slot is already full, instead of downloading a frame that would be
+    replaced before it is shown.
+    """
+    def __init__(self, publish, failed, decode=decode_jpeg):
+        self.condition = threading.Condition()
+        self.pending = None
+        self.closed = False
+        self.publish, self.failed, self.decode = publish, failed, decode
+        self.thread = threading.Thread(target=self._run, name='synchro-decode', daemon=True)
+        self.thread.start()
+
+    def submit(self, packet):
+        with self.condition:
+            if not self.closed:
+                self.pending = packet
+                self.condition.notify_all()
+
+    def wait_for_slot(self, stop_event):
+        """Return once the pending slot is empty. Stop and close unblock the wait."""
+        with self.condition:
+            while self.pending is not None and not self.closed and not stop_event.is_set():
+                self.condition.wait(timeout=0.05)
+            return not self.closed and not stop_event.is_set()
+
+    def close(self):
+        with self.condition:
+            self.closed = True
+            self.pending = None
+            self.condition.notify_all()
+        self.thread.join(timeout=1)
+
+    def _run(self):
+        while True:
+            with self.condition:
+                self.condition.wait_for(lambda: self.closed or self.pending is not None)
+                if self.closed:
+                    return
+                packet, self.pending = self.pending, None
+                self.condition.notify_all()
+            try:
+                frame = self.decode(packet)
+            except Exception:
+                with self.condition:
+                    if not self.closed:
+                        self.closed = True
+                        self.pending = None
+                        self.condition.notify_all()
+                        self.failed()
+                return
+            with self.condition:
+                if not self.closed:
+                    self.publish(frame)
+
+
+class FrameRate:
+    """UI writes, receiver reads; never access Tk variables from a worker."""
+    def __init__(self, value=15):
+        self.lock = threading.Lock()
+        self.set(value)
+
+    def set(self, value):
+        value = float(value)
+        if not math.isfinite(value) or not 0 < value <= 30:
+            raise ValueError('FPS cap must be greater than 0 and at most 30.')
+        with self.lock:
+            self.value = value
+
+    def get(self):
+        with self.lock:
+            return self.value
+
+
+def reconnect_delay(opened, attempt=0):
+    """Backoff after a dropped camera session. The camera accepts one client."""
+    attempt = max(0, attempt)
+    if opened:
+        # 1s matches SO_LINGER. Later steps cover a radio that is still releasing.
+        schedule = (CAMERA_LINGER_SECONDS, CAMERA_RETRY_SECONDS, 4, CAMERA_RECOVER_SECONDS)
+    else:
+        schedule = (CAMERA_RETRY_SECONDS, 4, CAMERA_RECOVER_SECONDS)
+    return schedule[min(attempt, len(schedule) - 1)]
+
+
+def schedule_reconnect(opened, attempt):
+    """Wait, then the attempt count for the following failure.
+
+    A session that connected retries after linger. The next refused connect
+    starts the cold schedule over, so a live drop is not punished by earlier
+    power-off retries and a powered-off camera does not retry every second.
+    """
+    if opened:
+        return reconnect_delay(True, 0), 0
+    return reconnect_delay(False, attempt), attempt + 1
+
+
+def configure_link(connection):
+    try:
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 256 * 1024)
+    except OSError:
+        pass
+    try:
+        # Finish the RFCOMM close so the camera can accept the next session.
+        connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                           struct.pack('ii', 1, CAMERA_LINGER_SECONDS))
+    except OSError:
+        pass
+
+
+def put_latest(destination, value):
+    try:
+        destination.put_nowait(value)
+    except queue.Full:
+        try:
+            destination.get_nowait()
+        except queue.Empty:
+            pass
+        destination.put_nowait(value)
+
+
+def format_latency(seconds, jpeg_bytes=None, display_seconds=None):
+    """Request-to-decode, then receipt-to-preview when that update has happened."""
+    if seconds is None:
+        return '—'
+    text = f'{seconds * 1000:.0f} ms'
+    if jpeg_bytes:
+        text += f' · {max(1, round(jpeg_bytes / 1000))} kB'
+    if display_seconds is not None:
+        text += f'\nshow {max(0, display_seconds) * 1000:.0f} ms'
+    return text
+
+
+def replace_preview(existing, image, create):
+    """Keep one Tk image while the preview size is unchanged."""
+    if (existing is not None and existing.width() == image.width
+            and existing.height() == image.height):
+        existing.paste(image)
+        return existing
+    return create(image)
+
+
+def receive_frames(camera, decoder, rate_limit, stop_event):
+    """One transfer may overlap the decode in progress. A full pending slot waits.
+
+    CAPTURE_ERROR keeps this socket. Five in a row, a broken frame, or a recv
+    that goes silent close the session so the byte stream cannot drift.
+    """
+    skips = 0
+    while not stop_event.is_set():
+        if not decoder.wait_for_slot(stop_event):
+            if stop_event.is_set():
+                break
+            raise ProtocolError('JPEG decode failed')
+        began = time.perf_counter()
+        packet = camera.receive_jpeg()
+        if stop_event.is_set():
+            break
+        if packet is None:
+            skips += 1
+            if skips >= CAPTURE_SKIP_LIMIT:
+                raise ProtocolError('Camera failed repeated captures')
+            stop_event.wait(min(0.2, 1 / rate_limit.get()))
+            continue
+        skips = 0
+        decoder.submit(packet)
+        stop_event.wait(max(0, 1 / rate_limit.get() - (time.perf_counter() - began)))
 
 
 class Camera:
@@ -76,9 +278,11 @@ class Camera:
 
     def connect(self):
         self.connection = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        self.connection.settimeout(12)
+        configure_link(self.connection)
+        self.connection.settimeout(CONNECT_TIMEOUT_SECONDS)
         self.connection.connect((self.address, self.channel))
-        self.connection.settimeout(6)
+        # Each silent gap is limited. Bytes that keep arriving extend the frame.
+        self.connection.settimeout(FRAME_STALL_SECONDS)
         self.reader = Reader(self.connection)
         self.connection.sendall(b'STATUS\n')
         status = json.loads(self.reader.line())
@@ -86,10 +290,13 @@ class Camera:
             raise ProtocolError('The Bluetooth camera firmware is not ready')
         return status
 
-    def capture(self):
+    def receive_jpeg(self):
         began = time.perf_counter()
         self.connection.sendall(b'CAPTURE\n')
         header = self.reader.line()
+        if header == b'CAPTURE_ERROR':
+            # The firmware stays on this client and the next command is in sync.
+            return None
         match = re.fullmatch(rb'JPEG_BEGIN (\d+) (\d+) (\d+)', header)
         if not match:
             raise ProtocolError('Camera did not return a photo: ' + repr(header))
@@ -101,13 +308,14 @@ class Camera:
             raise ProtocolError('Incomplete frame trailer')
         if not jpeg.startswith(b'\xff\xd8') or not jpeg.endswith(b'\xff\xd9'):
             raise ProtocolError('Invalid JPEG markers')
-        with Image.open(BytesIO(jpeg)) as decoded:
-            if decoded.size != (width, height):
-                raise ProtocolError('JPEG dimensions do not match its header')
-            decoded.load()
-            picture = decoded.convert('RGB')
-        now = time.perf_counter()
-        return Frame(jpeg, picture, now - began, now)
+        return ReceivedJPEG(jpeg, width, height, began, time.perf_counter())
+
+    def capture(self):
+        # Synchronous compatibility path for the protocol probe.
+        packet = self.receive_jpeg()
+        if packet is None:
+            raise ProtocolError('Camera did not return a photo: CAPTURE_ERROR')
+        return decode_jpeg(packet)
 
     def close(self):
         connection, self.connection = self.connection, None
@@ -200,18 +408,31 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     metrics = tk.Frame(camera_panel, bg=PANEL)
     metrics.grid(row=6, column=0, sticky='ew', pady=(12, 0))
     metric_values = [tk.StringVar(value='—') for _ in range(3)]
-    for index, caption in enumerate(('FRAME RATE', 'ROUND TRIP', 'RESOLUTION')):
+    for index, caption in enumerate(('DECODED FPS', 'REQUEST → DECODE', 'RESOLUTION')):
         metrics.columnconfigure(index, weight=1, uniform='metric')
         cell = tk.Frame(metrics, bg=INSET, padx=9, pady=9)
         cell.grid(row=0, column=index, sticky='ew', padx=(0 if index == 0 else 5, 0))
         tk.Label(cell, text=caption, font=(FONT, 8), fg=MUTED, bg=INSET, anchor='w').pack(fill='x')
         tk.Label(cell, textvariable=metric_values[index], font=(FONT, 11, 'bold'),
-                 fg=TEXT, bg=INSET, anchor='w').pack(fill='x', pady=(4, 0))
+                 fg=TEXT, bg=INSET, anchor='w', justify='left').pack(fill='x', pady=(4, 0))
 
-    def set_camera_metrics(rate=None, seconds=None, width=None, height=None):
-        metric_values[0].set(f'{rate:.1f} fps' if rate else '—')
-        metric_values[1].set(f'{seconds * 1000:.0f} ms' if seconds is not None else '—')
-        metric_values[2].set(f'{width} × {height}' if width is not None else '—')
+    readout = {'rate': None, 'seconds': None, 'width': None, 'height': None,
+               'jpeg_bytes': None, 'display_seconds': None}
+
+    def set_camera_metrics(rate=None, seconds=None, width=None, height=None, jpeg_bytes=None,
+                           display_seconds=None, *, display_only=False):
+        if display_only:
+            readout['display_seconds'] = display_seconds
+        elif rate is None and seconds is None and width is None:
+            readout.update(rate=None, seconds=None, width=None, height=None,
+                           jpeg_bytes=None, display_seconds=None)
+        else:
+            readout.update(rate=rate, seconds=seconds, width=width, height=height,
+                           jpeg_bytes=jpeg_bytes, display_seconds=display_seconds)
+        metric_values[0].set(f"{readout['rate']:.1f} fps" if readout['rate'] else '—')
+        metric_values[1].set(format_latency(readout['seconds'], readout['jpeg_bytes'],
+                                            readout['display_seconds']))
+        metric_values[2].set(f"{readout['width']} × {readout['height']}" if readout['width'] is not None else '—')
 
     tk.Label(camera_panel, text='Bluetooth Classic · Local device connection', fg=MUTED, bg=PANEL,
              anchor='w').grid(row=7, column=0, sticky='ew', pady=(6, 0))
@@ -222,8 +443,9 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     wrap_labels(camera_panel, camera_status, photo_status, image_label)
     frames = queue.Queue(maxsize=1)
     events = queue.Queue()
-    state = {'thread': None, 'stop': None, 'camera': None, 'frame': None, 'photo': None, 'closing': False}
+    state = {'thread': None, 'stop': None, 'camera': None, 'frame': None, 'photo': None, 'closing': False, 'session': 0}
     timings = deque()
+    rate_limit = FrameRate(fps)
     rotated = tk.BooleanVar(value=rotation == 180)
     camera_snapshot = CameraSnapshot()
     assistant = JarvisAssistant(camera_snapshot)
@@ -240,7 +462,9 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
 
     root.after_idle(lambda: panes.sashpos(0, max(400, root.winfo_width() - 560)))
 
-    motion = MotionPanel(inspector, mpu_port, motion_transport, mpu_ble_address, connect=not preview)
+    radio_hold = threading.Event()
+    motion = MotionPanel(inspector, mpu_port, motion_transport, mpu_ble_address,
+                         connect=not preview, radio_hold=radio_hold)
     if pause_pointer:
         motion.pointer.disable('Pointer paused for voice testing. Enable to resume.')
     inspector.add(motion.frame, text='Glove')
@@ -255,40 +479,58 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     # Both destinations stay visible. Voice-test launches select Speech without hiding Glove.
     if pause_pointer:
         inspector.select(speech.frame)
-    ttk.Checkbutton(camera_panel, text='Rotate 180°', variable=rotated, command=change_rotation).grid(row=5, column=0, sticky='w', pady=(10, 0))
+    camera_options = tk.Frame(camera_panel, bg=PANEL)
+    camera_options.grid(row=5, column=0, sticky='ew', pady=(10, 0))
+    ttk.Checkbutton(camera_options, text='Rotate 180°', variable=rotated,
+                    command=change_rotation).pack(side='left')
+    tk.Label(camera_options, text='FPS cap', bg=PANEL, fg=MUTED).pack(side='left', padx=(16, 6))
+    fps_value = tk.StringVar(value=f'{fps:g}')
+    fps_choice = ttk.Combobox(camera_options, textvariable=fps_value, width=5,
+                              values=tuple(dict.fromkeys((f'{fps:g}', '5', '10', '15', '20', '30'))),
+                              state='readonly')
+    fps_choice.pack(side='left')
+    fps_choice.bind('<<ComboboxSelected>>', lambda event: rate_limit.set(fps_value.get()))
     image_label.bind('<Configure>', lambda event: render_picture())
 
     def worker(stop_event):
+        attempt = 0
         while not stop_event.is_set():
             camera = Camera(address, channel)
             state['camera'] = camera
+            state['session'] += 1
+            session = state['session']
+            decoder = FrameDecoder(lambda frame: put_latest(frames, (session, frame)), camera.close)
+            opened = False
             try:
                 camera.connect()
-                events.put('Bluetooth connected. Receiving images...')
-                while not stop_event.is_set():
-                    began = time.perf_counter()
-                    frame = camera.capture()
-                    if stop_event.is_set():
-                        break
-                    try:
-                        frames.put_nowait(frame)
-                    except queue.Full:
-                        try:
-                            frames.get_nowait()
-                        except queue.Empty:
-                            pass
-                        frames.put_nowait(frame)
-                    stop_event.wait(max(0, 1 / fps - (time.perf_counter() - began)))
-            except (OSError, ValueError, ProtocolError, AttributeError) as error:
+                opened = True
+                radio_hold.set()
+                events.put((session, 'Bluetooth connected. Receiving images...'))
+                receive_frames(camera, decoder, rate_limit, stop_event)
+            except (TimeoutError, OSError, ValueError, ProtocolError, AttributeError) as error:
+                decoder.close()
                 camera_snapshot.clear()
                 if not stop_event.is_set():
                     print(f'Camera Bluetooth: {error}', file=sys.stderr, flush=True)
-                    events.put('Camera unavailable. Check camera power; reconnecting...')
+                    if not opened:
+                        message = 'Camera unavailable. Check camera power; reconnecting...'
+                    elif isinstance(error, TimeoutError):
+                        message = 'Camera unavailable. Transfer stalled; reconnecting...'
+                    elif isinstance(error, ProtocolError):
+                        message = 'Camera unavailable. Capture failed; reconnecting...'
+                    else:
+                        message = 'Camera unavailable. Link dropped; reconnecting once the radio is free...'
+                    events.put((session, message))
             finally:
+                radio_hold.clear()
+                decoder.close()
                 camera.close()
                 if state['camera'] is camera:
                     state['camera'] = None
-            stop_event.wait(2)
+            if stop_event.is_set():
+                break
+            delay, attempt = schedule_reconnect(opened, attempt)
+            stop_event.wait(delay)
 
     def start():
         if preview:
@@ -359,8 +601,8 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
             return
         running = state['stop'] and not state['stop'].is_set()
         while not events.empty():
-            text = events.get_nowait()
-            if running:
+            session, text = events.get_nowait()
+            if running and session == state['session']:
                 status_text.set(text)
                 connection_text.set('●  Reconnecting' if 'unavailable' in text else '●  Connected')
                 connection_label.config(fg=WARN if 'unavailable' in text else MINT)
@@ -378,10 +620,10 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
                     timings.clear()
                     set_camera_metrics()
         try:
-            frame = frames.get_nowait()
+            session, frame = frames.get_nowait()
         except queue.Empty:
             frame = None
-        if frame and running:
+        if frame and running and session == state['session']:
             state['frame'] = frame
             camera_snapshot.update(frame, rotated.get())
             width, height = frame.image.size
@@ -393,7 +635,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
             connection_text.set('●  Live')
             connection_label.config(fg=MINT)
             save_button.config(state='normal')
-            set_camera_metrics(rate, frame.seconds, width, height)
+            set_camera_metrics(rate, frame.seconds, width, height, len(frame.jpeg))
             status_text.set('Live image from Synchro-Cam-BT.')
         if state['thread'] and not state['thread'].is_alive():
             start_button.config(state='normal')
@@ -403,9 +645,12 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
             if prepared.error:
                 status_text.set(prepared.error)
             else:
-                # Tk object creation must remain on this thread.
-                state['photo'] = ImageTk.PhotoImage(prepared.image)
+                # Tk object creation must remain on this thread. Same-size frames reuse it.
+                state['photo'] = replace_preview(state['photo'], prepared.image, ImageTk.PhotoImage)
                 image_label.config(image=state['photo'], text='')
+                received_at = getattr(prepared.frame, 'received_at', None)
+                if received_at is not None:
+                    set_camera_metrics(display_seconds=time.perf_counter() - received_at, display_only=True)
         root.after(CAMERA_REFRESH_MS, update_camera)
 
     def update_controls():

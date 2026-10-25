@@ -12,7 +12,7 @@ from unittest.mock import patch, MagicMock
 
 from PIL import Image
 from jarvis_assistant import (JarvisAssistant, CameraSnapshot, GeminiVision, AssistantError,
-                              MODEL, WindowsSpeech, SYSTEM_PROMPT, RESPONSE_SCHEMA,
+                              MODEL, HISTORY_TURNS, WindowsSpeech, SYSTEM_PROMPT, RESPONSE_SCHEMA,
                               ResponsePlan, Action, parse_response)
 from text_writer import TextWriteError
 from speech_panel import conversation_text
@@ -230,6 +230,14 @@ class JarvisTests(unittest.TestCase):
         content = conversation_text(self.jarvis.snapshot())
         self.assertIn('What color is it?', content)
         self.assertIn('Would that color work for a logo?', content)
+
+    def test_conversation_keeps_only_the_latest_turns(self):
+        for index in range(HISTORY_TURNS + 2):
+            self.submit(f'Question {index}?')
+        history = self.jarvis.snapshot()['conversation']
+        self.assertEqual(len(history), HISTORY_TURNS)
+        self.assertEqual(history[0][0], 'Question 2?')
+        self.assertEqual(history[-1][0], f'Question {HISTORY_TURNS + 1}?')
 
     def test_new_chat_clears_context_and_ui(self):
         self.submit('What color is it?')
@@ -474,7 +482,7 @@ class ApiTests(unittest.TestCase):
         client.models.generate_content.return_value.text = json.dumps({'reply': 'A red box.', 'actions': []})
         with patch('gemini_secrets.load_key',return_value='synthetic-test-only'), \
              patch('google.genai.Client') as factory:
-            factory.return_value.__enter__.return_value = client
+            factory.return_value = client
             self.assertEqual(GeminiVision().ask('What is this?',b'image'), ResponsePlan('A red box.'))
         args = client.models.generate_content.call_args.kwargs
         self.assertEqual(args['model'],MODEL)
@@ -490,7 +498,7 @@ class ApiTests(unittest.TestCase):
         client.models.generate_content.return_value.text = json.dumps({
             'reply': '', 'actions': [{'type': 'text', 'value': 'Hello, Alex!'}]})
         with patch('gemini_secrets.load_key', return_value='synthetic-test-only'), patch('google.genai.Client') as factory:
-            factory.return_value.__enter__.return_value = client
+            factory.return_value = client
             plan = GeminiVision().ask('Write a greeting.', None, history=(('His name is Alex.', 'Understood.'),))
         self.assertEqual(plan.actions, (Action('text', 'Hello, Alex!'),))
         args = client.models.generate_content.call_args.kwargs
@@ -501,6 +509,9 @@ class ApiTests(unittest.TestCase):
         self.assertIn(SYSTEM_PROMPT, args['config'].system_instruction)
         self.assertEqual(args['config'].response_mime_type, 'application/json')
         self.assertEqual(args['config'].response_json_schema, RESPONSE_SCHEMA)
+        from google.genai import types
+        self.assertEqual(args['config'].thinking_config.thinking_level, types.ThinkingLevel.MINIMAL)
+        self.assertEqual(args['config'].media_resolution, types.MediaResolution.MEDIA_RESOLUTION_MEDIUM)
 
     def test_api_error_does_not_echo_server_body_or_key(self):
         client=MagicMock()
@@ -509,7 +520,7 @@ class ApiTests(unittest.TestCase):
         client.models.generate_content.side_effect=error
         with patch('gemini_secrets.load_key',return_value='synthetic-test-only'), \
              patch('google.genai.Client') as factory:
-            factory.return_value.__enter__.return_value=client
+            factory.return_value=client
             with self.assertRaises(AssistantError) as caught: GeminiVision().ask('question',b'image')
         self.assertIn('quota',str(caught.exception))
         self.assertNotIn('private-server-body',str(caught.exception))

@@ -1,7 +1,10 @@
 """Wake-word requests: local transcript -> fresh camera JPEG -> Gemini -> local TTS."""
 from io import BytesIO
 from dataclasses import dataclass
+from contextlib import suppress
 import json
+import base64
+import queue
 import os
 import re
 import subprocess
@@ -10,6 +13,8 @@ import time
 from text_writer import WindowsTextWriter, TextWriteError, KEY_CHORDS
 
 MODEL = 'gemini-3.5-flash-lite'
+CLOUD_JPEG_QUALITY = 75
+HISTORY_TURNS = 8
 WAKE = re.compile(r'\bjarvis\b', re.IGNORECASE)
 TERMINATOR = re.compile(r"""[.!?]["'”’)\]}]*\s*$""")
 READY_MESSAGE = 'Say “Jarvis”, then ask a question. Sends when the transcript ends with . ? or !'
@@ -140,33 +145,98 @@ class CameraSnapshot:
         self.lock = threading.Lock()
         self.frame = None
         self.rotation = False
+        self.cached = None
+        self.epoch = 0
+        self.encode_lock = threading.Lock()
 
     def update(self, frame, rotation):
         with self.lock:
+            if frame is not self.frame or rotation != self.rotation:
+                self.cached = None
+            if rotation != self.rotation:
+                self.epoch += 1
             self.frame, self.rotation = frame, rotation
 
     def clear(self):
         with self.lock:
             self.frame = None
+            self.cached = None
+            self.epoch += 1
 
     def set_rotation(self, rotation):
         with self.lock:
+            if rotation != self.rotation:
+                self.cached = None
+                self.epoch += 1
             self.rotation = rotation
 
     def jpeg(self):
-        from PIL import Image
-        with self.lock:
-            frame, rotation = self.frame, self.rotation
-        if frame is None or not 0 <= time.perf_counter() - frame.received_at <= 5:
-            raise AssistantError('No fresh camera image. Power the camera and start live view, then say Jarvis again.')
-        if not rotation:
-            return frame.jpeg
-        output = BytesIO()
-        frame.image.transpose(Image.Transpose.ROTATE_180).save(output, format='JPEG', quality=90)
-        return output.getvalue()
+        # Serialize encodes without blocking UI updates while Pillow is working.
+        with self.encode_lock:
+            with self.lock:
+                frame, rotation, cached = self.frame, self.rotation, self.cached
+                epoch = self.epoch
+            if frame is None or not 0 <= time.perf_counter() - frame.received_at <= 5:
+                raise AssistantError('No fresh camera image. Power the camera and start live view, then say Jarvis again.')
+            if not rotation:
+                return frame.jpeg
+            if cached is not None:
+                return cached
+            result = encode_vision_jpeg(frame.image, rotation=True)
+            with self.lock:
+                if epoch != self.epoch:
+                    raise AssistantError('Camera changed while preparing the image. Ask again.')
+                if frame is self.frame and rotation == self.rotation:
+                    self.cached = result
+            return result
+
+
+def encode_vision_jpeg(image, *, rotation=False, quality=CLOUD_JPEG_QUALITY, max_edge=None):
+    """Default matches existing cloud image; alternatives are benchmark-only."""
+    from PIL import Image
+    if rotation:
+        image = image.transpose(Image.Transpose.ROTATE_180)
+    if max_edge is not None:
+        image = image.copy()
+        image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    output = BytesIO()
+    image.save(output, format='JPEG', quality=quality)
+    return output.getvalue()
 
 
 class GeminiVision:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.closed = threading.Event()
+        self.client = None
+        self.key = None
+
+    def _client(self, key, genai, types):
+        if self.closed.is_set():
+            raise AssistantError('Jarvis is shutting down.')
+        if self.client is None or key != self.key:
+            if self.client is not None:
+                self.client.close()
+            self.client = None
+            self.key = None
+            self.client = genai.Client(api_key=key, http_options=types.HttpOptions(
+                timeout=30000, retry_options=types.HttpRetryOptions(attempts=1)))
+            self.key = key
+        return self.client
+
+    def close(self):
+        self.closed.set()
+        # An in-flight network call may take up to its timeout. Never block Tk.
+        def release():
+            with self.lock:
+                if self.client is not None:
+                    self.client.close()
+                    self.client = None
+                    self.key = None
+        thread = threading.Thread(target=release, name='synchro-gemini-close', daemon=True)
+        thread.start()
+        return thread
+
     def ask(self, query, jpeg=None, *, history=()):
         from google import genai
         from google.genai import types
@@ -184,14 +254,17 @@ class GeminiVision:
             if jpeg is not None:
                 parts.append(types.Part.from_bytes(data=jpeg, mime_type='image/jpeg'))
             contents.append(types.Content(role='user', parts=parts))
-            with genai.Client(api_key=key, http_options=types.HttpOptions(
-                    timeout=30000, retry_options=types.HttpRetryOptions(attempts=1))) as client:
+            with self.lock:
+                client = self._client(key, genai, types)
                 response = client.models.generate_content(model=MODEL,
                     contents=contents,
                     config=types.GenerateContentConfig(
                         system_instruction=SYSTEM_PROMPT,
                         response_mime_type='application/json', response_json_schema=RESPONSE_SCHEMA,
-                        temperature=.2, max_output_tokens=8192))
+                        temperature=.2, max_output_tokens=8192,
+                        thinking_config=types.ThinkingConfig(
+                            thinking_level=types.ThinkingLevel.MINIMAL),
+                        media_resolution=types.MediaResolution.MEDIA_RESOLUTION_MEDIUM))
             text = (response.text or '').strip()
             if not text:
                 raise AssistantError('Gemini returned no text. Try rephrasing the request.')
@@ -210,34 +283,114 @@ class GeminiVision:
 
 
 class WindowsSpeech:
-    """Cancellable Windows speech; response text goes through stdin, never code."""
+    """One reusable speech process. Base64 lines carry data, never executable text.
+
+    Cancellation terminates the process; the next reply lazily starts a clean one.
+    Normal replies reuse both PowerShell and its SpeechSynthesizer.
+    """
+    SCRIPT = (
+        "$ErrorActionPreference='Stop'; "
+        "Add-Type -AssemblyName System.Speech; "
+        "$voice=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        "try { [Console]::Out.WriteLine('READY'); [Console]::Out.Flush(); "
+        "while ($null -ne ($line=[Console]::In.ReadLine())) { "
+        "$text=[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($line)); "
+        "$voice.Speak($text); [Console]::Out.WriteLine('DONE'); [Console]::Out.Flush() "
+        "} } finally { $voice.Dispose() }"
+    )
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.process_lock = threading.Lock()
+        self.closed = threading.Event()
+        self.process = None
+        self.messages = None
+
+    def _start(self):
+        with self.process_lock:
+            if self.closed.is_set():
+                raise AssistantError('Jarvis is shutting down.')
+            if self.process is not None:
+                if self.process.poll() is None:
+                    return False
+                with suppress(OSError, ValueError):
+                    self.process.stdin.close()
+            process = subprocess.Popen(
+                ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', self.SCRIPT],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW)
+            self.process = process
+            self.messages = messages = queue.Queue()
+            def read():
+                try:
+                    for line in process.stdout:
+                        messages.put(line.strip())
+                finally:
+                    process.stdout.close()
+                    messages.put(None)
+            threading.Thread(target=read, name='synchro-speech-output', daemon=True).start()
+            return True
+
+    def _stop(self):
+        with self.process_lock:
+            process, self.process = self.process, None
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    with suppress(OSError):
+                        process.kill()
+                process.wait(timeout=3)
+            finally:
+                if process.stdin:
+                    with suppress(OSError, ValueError):
+                        process.stdin.close()
+                # The reader owns stdout and closes it after EOF.
+
+    def _wait(self, expected, cancel, timeout):
+        deadline = time.monotonic() + timeout
+        while not cancel.is_set() and not self.closed.is_set():
+            try:
+                message = self.messages.get(timeout=.05)
+            except queue.Empty:
+                if time.monotonic() < deadline:
+                    continue
+                raise AssistantError('Windows speech playback timed out.')
+            if message == expected:
+                return True
+            if cancel.is_set() or self.closed.is_set():
+                return False
+            raise AssistantError('The reply is displayed, but Windows speech playback failed.')
+        return False
+
     def speak(self, text, cancel):
-        if cancel.is_set():
+        if cancel.is_set() or self.closed.is_set():
             return
         if os.name != 'nt':
             raise AssistantError('Spoken playback currently requires Windows.')
-        script = ("$ErrorActionPreference='Stop'; "
-                  "[Console]::InputEncoding=[System.Text.Encoding]::UTF8; "
-                  "Add-Type -AssemblyName System.Speech; "
-                  "$voice=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                  "try { $voice.Speak([Console]::In.ReadToEnd()) } finally { $voice.Dispose() }")
-        process = subprocess.Popen(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW)
-        try:
-            process.stdin.write(text.encode('utf-8'))
-            process.stdin.close()
-            while process.poll() is None:
-                if cancel.wait(.05):
-                    process.terminate()
-                    break
-            process.wait(timeout=3)
-            if process.returncode and not cancel.is_set():
-                raise AssistantError('The reply is displayed, but Windows speech playback failed.')
-        finally:
-            if process.poll() is None:
-                process.kill()
-                process.wait(timeout=3)
+        with self.lock:
+            if cancel.is_set() or self.closed.is_set():
+                return
+            try:
+                if self._start() and not self._wait(b'READY', cancel, 15):
+                    self._stop()
+                    return
+                payload = base64.b64encode(text.encode('utf-8')) + b'\n'
+                self.process.stdin.write(payload)
+                self.process.stdin.flush()
+                # Bound a hung worker, while allowing long supported replies.
+                if not self._wait(b'DONE', cancel, max(60, len(text) * .5)):
+                    self._stop()
+            except AssistantError:
+                self._stop()
+                raise
+            except Exception:
+                self._stop()
+                if not cancel.is_set() and not self.closed.is_set():
+                    raise AssistantError('The reply is displayed, but Windows speech playback failed.') from None
+
+    def close(self):
+        self.closed.set()
+        self._stop()
 
 
 class JarvisAssistant:
@@ -382,6 +535,8 @@ class JarvisAssistant:
             self.worker.start()
 
     def _respond(self, generation, query, cancel):
+        grabber = None
+        captured = {}
         try:
             target, target_error = None, None
             with self.lock:
@@ -389,13 +544,16 @@ class JarvisAssistant:
                     return
                 history = tuple(self.history)
                 actions_enabled = self.type_writes
-            # Capture before the network call, without knowing the model's plan.
+            # Focus lookup runs while the image and Gemini call proceed.
             # A failed capture only blocks actions, not ordinary conversation.
             if actions_enabled:
-                try:
-                    target = self.writer.capture()
-                except TextWriteError as error:
-                    target_error = str(error)
+                def grab():
+                    try:
+                        captured['target'] = self.writer.capture()
+                    except TextWriteError as error:
+                        captured['error'] = str(error)
+                grabber = threading.Thread(target=grab, name='synchro-focus', daemon=True)
+                grabber.start()
             began = self.clock()
             try:
                 jpeg = self.camera.jpeg()
@@ -408,12 +566,19 @@ class JarvisAssistant:
                 self.status = 'Asking Gemini with conversation context…'
                 self.revision += 1
             plan = self.client.ask(query, jpeg, history=history)
+            if grabber is not None:
+                grabber.join()
+                grabber = None
+                target = captured.get('target')
+                target_error = captured.get('error')
             answer = plan.display()
             with self.lock:
                 if cancel.is_set() or generation != self.generation:
                     return
                 self.response = answer
                 self.history.append((query, answer))
+                if len(self.history) > HISTORY_TURNS:
+                    del self.history[:-HISTORY_TURNS]
                 self.results += 1
                 self.latency_ms = (self.clock() - began) * 1000
                 self.revision += 1
@@ -469,6 +634,8 @@ class JarvisAssistant:
                 if generation == self.generation and not cancel.is_set():
                     self.error = 'Jarvis could not complete this request. Try again.'
         finally:
+            if grabber is not None:
+                grabber.join()
             with self.lock:
                 if generation == self.generation:
                     self.generation += 1
@@ -477,4 +644,9 @@ class JarvisAssistant:
                     self.status = 'Ready. Say Jarvis for another request.'
                     self.revision += 1
 
-    close = cancel
+    def close(self):
+        self.cancel('Jarvis stopped.')
+        for resource in (self.client, self.speaker, self.writer):
+            close = getattr(resource, 'close', None)
+            if close is not None:
+                close()

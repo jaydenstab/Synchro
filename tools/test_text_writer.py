@@ -26,6 +26,7 @@ class WriterTests(unittest.TestCase):
     def setUp(self):
         self.backend = Backend()
         self.writer = WindowsTextWriter(self.backend)
+        self.addCleanup(self.writer.close)
         self.target = self.writer.capture()
         self.cancel = threading.Event()
 

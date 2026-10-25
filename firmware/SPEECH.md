@@ -16,22 +16,11 @@ they do not independently trigger cloud requests.
 
 Click **Start mic** to listen or **Stop mic** to release the microphone. A visible
 **MIC ON** indicator, input selector and level meter show what is active.
-**Noise suppression** is enabled by default and runs RNNoise locally before
-both Silero and Parakeet. The status shows **RNNoise on** only once the filter
-has loaded. Stop the mic to change the input or toggle suppression. Select your
-headset or microphone from the available MME/Windows WASAPI inputs, then click
-**Start mic**. Device names depend on the receiving computer. Selection applies
-to this viewer session; it is not a saved user profile.
-
-RNNoise reduces background noise; it does not isolate one speaker from other
-people speaking. Its native library is supplied by the pinned `pyrnnoise`
-package. Stateful FIR conversion handles 16 → 48 → 16 kHz, preserving sample
-counts with a 10 ms frame reserve and 2 ms resampling delay, plus RNNoise's
-internal delay. The filter runs on the capture worker, outside the audio
-callback. Clear, audio gaps, and Jarvis playback mute reset its buffered audio
-and recurrent state. Stopping capture releases its native state. If RNNoise
-cannot load, the mic stays off with a visible message; suppression can be
-unchecked to use the unfiltered input.
+The microphone starts without RNNoise, so capture goes straight to Silero and
+Parakeet. Select your headset or microphone from the available MME/Windows
+WASAPI inputs, then click **Start mic**. Device names depend on the receiving
+computer. Selection applies to this viewer session; it is not a saved user
+profile. Stop the mic before changing the input.
 
 **Clear text** clears the transcript and discards older queued/in-flight results.
 Closing the viewer stops capture. **Pause pointer** pauses the glove pointer;
