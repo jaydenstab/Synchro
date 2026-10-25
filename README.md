@@ -1,1 +1,1 @@
-# GloveMouse
+# Synchro
