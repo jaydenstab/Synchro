@@ -3,7 +3,7 @@
 You are modifying an existing runnable Python/FastAPI synthetic gesture-recognition prototype. Read README.md, app.py, engine.py, simulator.py, static/index.html and tests/test_engine.py before changes. Do not replace a functioning application with a mockup.
 
 ## Project objective
-Build a usable, locally running Mac app for personalized **six-axis IMU** gesture recognition with future Arduino Nano ESP32 + MPU6050 integration. Hardware is NOT currently available. The owner uses Codex with locally served gpt-oss:20b. Keep local development and main demo functional without paid APIs, internet services, or physical hardware.
+Build a usable Mac and Windows app for the Synchro glove. Firmware, wiring, `SYNIMU1` decode, USB/BLE motion, the Windows pointer, and local speech live in this repo. Gesture recognition stays in the app but is not the current hardware milestone. Keep the FastAPI server and React UI working without a glove attached. The Mac camera radio stays in `camera/synchro_mac`. Do not replace that window with the Tk viewer in `tools/`.
 
 ## Priorities
 1. Maintain a genuinely executable, testable FastAPI + DTW engine and synthetic input mode.
@@ -40,4 +40,4 @@ Sample object `{ "t_ms": 0, "ax": 0.0, "ay": 0.0, "az": 9.81, "gx": 0.0, "gy": 0
 - At the end of a task, report changed files, commands run, passing/failing tests, what's real vs simulated, limitations, and exact next task. Never claim successful execution unless observed.
 
 ## First priority
-Follow CODEX_START_HERE.md, implementing **Milestone A** completely before optional advanced phases.
+Keep the FastAPI backend, the React frontend, and the Mac camera viewer working. Do not add a second desktop shell or restore removed checkpoints.

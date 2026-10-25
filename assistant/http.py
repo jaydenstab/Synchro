@@ -35,15 +35,12 @@ def install_assistant(app: FastAPI, service: AssistantService) -> None:
     def camera_capture(request: Request) -> Response:
         service.limit(_client_key(request))
         frame = service.capture_frame()
-        return Response(
-            content=frame,
-            media_type='image/jpeg',
-            headers={
-                'Cache-Control': 'no-store',
-                'X-Synchro-Frame-Source': 'native-viewer',
-                'X-Synchro-Simulated': 'false',
-            },
-        )
+        return _jpeg(frame)
+
+    @app.get('/api/camera/preview')
+    def camera_preview() -> Response:
+        frame = service.capture_frame()
+        return _jpeg(frame)
 
     @app.post('/api/assistant/ask')
     async def ask(request: Request) -> dict:
@@ -70,6 +67,18 @@ def install_assistant(app: FastAPI, service: AssistantService) -> None:
         finally:
             await upload.close()
         return await asyncio.to_thread(service.transcribe, audio=data, mime_type=mime)
+
+
+def _jpeg(frame: bytes) -> Response:
+    return Response(
+        content=frame,
+        media_type='image/jpeg',
+        headers={
+            'Cache-Control': 'no-store',
+            'X-Synchro-Frame-Source': 'native-viewer',
+            'X-Synchro-Simulated': 'false',
+        },
+    )
 
 
 def _client_key(request: Request) -> str:

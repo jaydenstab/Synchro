@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2100" height="1690" viewBox="0 0 2100 1690">
+<rect width="2100" height="1690" fill="#F7F9FC"/>
+<text x="65" y="35" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="40" font-weight="600" fill="#17283B">SYNCHRO  /  COMPLETE WIRING</text>
+<text x="65" y="91" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#506278">One MPU on the back of the hand + conductive-tape clicks + Bluetooth camera  |  No breadboard</text>
+<rect x="65" y="165" width="405" height="170" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="89" y="185" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">PKCELL LP803860</text>
+<text x="89" y="224" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">3.7 V nominal  /  2000 mAh LiPo</text>
+<text x="90" y="262" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="22" font-weight="400" fill="#17283B">Use the existing JST plug.</text>
+<text x="90" y="296" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Check red + and black - polarity.</text>
+<rect x="620" y="165" width="550" height="325" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="644" y="185" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">Adafruit PowerBoost 1000C</text>
+<text x="644" y="224" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">5V output pin supplies approximately 5.2 V</text>
+<circle cx="620" cy="275" r="5" fill="#17283B"/>
+<text x="638" y="262" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">BATTERY JST</text>
+<polyline points="470,275 620,275" fill="none" stroke="#C33538" stroke-width="5" stroke-linejoin="round"/>
+<text x="545" y="237" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#C33538">2-wire JST</text>
+<circle cx="1170" cy="275" r="5" fill="#C33538"/>
+<text x="1152" y="262" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#C33538">5V OUT</text>
+<circle cx="1170" cy="310" r="5" fill="#17283B"/>
+<text x="1152" y="297" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">GND</text>
+<circle cx="620" cy="415" r="5" fill="#17283B"/>
+<text x="638" y="402" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">micro-USB IN</text>
+<text x="645" y="350" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">EN open = ON; USB / BAT / VS / LBO</text>
+<text x="645" y="379" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">header pins are unused in this circuit.</text>
+<circle cx="1000" cy="490" r="5" fill="#7954A8"/>
+<text x="982" y="477" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#7954A8"></text>
+<text x="1000" y="452" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#7954A8">USB-A OUTPUT SOCKET</text>
+<rect x="65" y="380" width="405" height="115" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="89" y="400" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">5 V USB charger</text>
+<text x="89" y="439" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Only plug in when charging; charge off-body.</text>
+<polyline points="470,415 620,415" fill="none" stroke="#506278" stroke-width="3" stroke-linejoin="round"/>
+<text x="545" y="455" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="17" font-weight="400" fill="#506278">micro-USB cable</text>
+<rect x="1500" y="165" width="535" height="355" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="1524" y="185" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">Inland ESP32-CAM</text>
+<text x="1524" y="224" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Existing 640 x 480 Bluetooth firmware</text>
+<circle cx="1500" cy="275" r="5" fill="#C33538"/>
+<text x="1518" y="262" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#C33538">5V</text>
+<circle cx="1500" cy="310" r="5" fill="#17283B"/>
+<text x="1518" y="297" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">GND  (plain GND only)</text>
+<circle cx="1500" cy="380" r="5" fill="#176FA1"/>
+<text x="1518" y="367" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">U0T / TX</text>
+<circle cx="1500" cy="440" r="5" fill="#176FA1"/>
+<text x="1518" y="427" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">U0R / RX</text>
+<text x="1525" y="480" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="19" font-weight="400" fill="#506278">IO0 and GND/R: leave disconnected.</text>
+<polyline points="1170,275 1500,275" fill="none" stroke="#C33538" stroke-width="5" stroke-linejoin="round"/>
+<polyline points="1170,310 1500,310" fill="none" stroke="#17283B" stroke-width="4" stroke-linejoin="round"/>
+<circle cx="1340" cy="310" r="6" fill="#17283B"/>
+<polyline points="1340,310 1340,340" fill="none" stroke="#17283B" stroke-width="3" stroke-linejoin="round"/>
+<rect x="1314" y="334" width="52" height="32" rx="5" fill="#E9EEF4" stroke="#17283B" stroke-width="2"/>
+<text x="1340" y="336" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#17283B">G1</text>
+<rect x="760" y="600" width="460" height="725" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="784" y="620" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">Arduino Nano ESP32</text>
+<text x="784" y="659" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Use the printed Arduino pin labels.</text>
+<circle cx="1000" cy="600" r="5" fill="#7954A8"/>
+<text x="1018" y="587" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#7954A8"></text>
+<text x="1000" y="685" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="19" font-weight="600" fill="#7954A8">USB-C power input</text>
+<polyline points="1000,490 1000,600" fill="none" stroke="#7954A8" stroke-width="8" stroke-linejoin="round"/>
+<text x="1020" y="536" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#7954A8">USB-A to USB-C cable</text>
+<circle cx="760" cy="750" r="5" fill="#17283B"/>
+<text x="778" y="737" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">GND near D2</text>
+<polyline points="698,750 760,750" fill="none" stroke="#17283B" stroke-width="3" stroke-linejoin="round"/>
+<rect x="647" y="734" width="52" height="32" rx="5" fill="#E9EEF4" stroke="#17283B" stroke-width="2"/>
+<text x="673" y="736" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#17283B">G1</text>
+<circle cx="760" cy="840" r="5" fill="#17283B"/>
+<text x="778" y="827" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">GND near VIN</text>
+<polyline points="698,840 760,840" fill="none" stroke="#17283B" stroke-width="3" stroke-linejoin="round"/>
+<rect x="647" y="824" width="52" height="32" rx="5" fill="#E9EEF4" stroke="#17283B" stroke-width="2"/>
+<text x="673" y="826" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#17283B">G2</text>
+<circle cx="1220" cy="720" r="5" fill="#176FA1"/>
+<text x="1202" y="707" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">D2</text>
+<circle cx="1220" cy="775" r="5" fill="#176FA1"/>
+<text x="1202" y="762" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">D3</text>
+<circle cx="1220" cy="865" r="5" fill="#AD5A00"/>
+<text x="1202" y="852" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#AD5A00">3V3</text>
+<circle cx="1220" cy="925" r="5" fill="#176FA1"/>
+<text x="1202" y="912" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">A4 / SDA</text>
+<circle cx="1220" cy="985" r="5" fill="#176FA1"/>
+<text x="1202" y="972" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">A5 / SCL</text>
+<circle cx="1220" cy="1125" r="5" fill="#176FA1"/>
+<text x="1202" y="1112" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">D4</text>
+<circle cx="1220" cy="1205" r="5" fill="#176FA1"/>
+<text x="1202" y="1192" dominant-baseline="text-before-edge" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">D5</text>
+<text x="785" y="1270" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="19" font-weight="400" fill="#506278">VIN and VUSB header pins: unused.</text>
+<polyline points="1220,720 1275,720 1275,380 1500,380" fill="none" stroke="#176FA1" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1220,775 1325,775 1325,440 1500,440" fill="none" stroke="#176FA1" stroke-width="3" stroke-linejoin="round"/>
+<text x="1355" y="550" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="17" font-weight="400" fill="#176FA1">UART wires</text>
+<text x="1355" y="576" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="17" font-weight="400" fill="#176FA1">for camera flashing</text>
+<rect x="1500" y="620" width="535" height="380" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="1524" y="640" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">MPU-6050 / GY-521</text>
+<text x="1524" y="679" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Mount firmly on the back of the hand.</text>
+<circle cx="1500" cy="725" r="5" fill="#AD5A00"/>
+<text x="1518" y="712" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#AD5A00">VCC</text>
+<circle cx="1500" cy="785" r="5" fill="#176FA1"/>
+<text x="1518" y="772" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">SDA</text>
+<circle cx="1500" cy="845" r="5" fill="#176FA1"/>
+<text x="1518" y="832" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">SCL</text>
+<polyline points="1220,865 1360,865 1360,725 1500,725" fill="none" stroke="#AD5A00" stroke-width="4" stroke-linejoin="round"/>
+<polyline points="1220,925 1405,925 1405,785 1500,785" fill="none" stroke="#176FA1" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1220,985 1445,985 1445,845 1500,845" fill="none" stroke="#176FA1" stroke-width="3" stroke-linejoin="round"/>
+<text x="1530" y="900" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="19" font-weight="400" fill="#506278">XDA / XCL / INT: leave disconnected.</text>
+<text x="1650" y="961" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">GND</text>
+<circle cx="1650" cy="1000" r="5" fill="#17283B"/>
+<polyline points="1650,1000 1650,1025" fill="none" stroke="#17283B" stroke-width="3" stroke-linejoin="round"/>
+<rect x="1624" y="1024" width="52" height="32" rx="5" fill="#E9EEF4" stroke="#17283B" stroke-width="2"/>
+<text x="1650" y="1026" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#17283B">G2</text>
+<text x="1900" y="961" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">AD0 (0x68)</text>
+<circle cx="1900" cy="1000" r="5" fill="#17283B"/>
+<polyline points="1900,1000 1900,1025" fill="none" stroke="#17283B" stroke-width="3" stroke-linejoin="round"/>
+<rect x="1874" y="1024" width="52" height="32" rx="5" fill="#E9EEF4" stroke="#17283B" stroke-width="2"/>
+<text x="1900" y="1026" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#17283B">G2</text>
+<rect x="1500" y="1060" width="535" height="290" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="1524" y="1080" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">Conductive-tape pads</text>
+<text x="1524" y="1119" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Tape surfaces touch during each pinch.</text>
+<circle cx="1500" cy="1170" r="5" fill="#176FA1"/>
+<text x="1518" y="1157" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">INDEX: left-click input</text>
+<circle cx="1500" cy="1250" r="5" fill="#176FA1"/>
+<text x="1518" y="1237" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#176FA1">MIDDLE: right-click input</text>
+<circle cx="1500" cy="1320" r="5" fill="#17283B"/>
+<text x="1518" y="1307" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="400" fill="#17283B">THUMB: common ground</text>
+<polyline points="1220,1125 1360,1125 1360,1170 1500,1170" fill="none" stroke="#176FA1" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1220,1205 1405,1205 1405,1250 1500,1250" fill="none" stroke="#176FA1" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1460,1320 1500,1320" fill="none" stroke="#17283B" stroke-width="3" stroke-linejoin="round"/>
+<rect x="1408" y="1304" width="52" height="32" rx="5" fill="#E9EEF4" stroke="#17283B" stroke-width="2"/>
+<text x="1434" y="1306" dominant-baseline="text-before-edge" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="20" font-weight="600" fill="#17283B">G2</text>
+<rect x="65" y="610" width="520" height="240" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="89" y="630" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">G1: POWER GROUND SPLICE</text>
+<text x="89" y="669" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Solder these 3 wire ends together; insulate.</text>
+<text x="92" y="710" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">1  PowerBoost GND</text>
+<text x="92" y="742" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">2  Camera plain GND</text>
+<text x="92" y="774" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">3  Nano GND near D2</text>
+<rect x="65" y="905" width="520" height="285" rx="14" fill="white" stroke="#C7D1DC" stroke-width="2"/>
+<text x="89" y="925" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="27" font-weight="600" fill="#17283B">G2: SENSOR GROUND SPLICE</text>
+<text x="89" y="964" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Solder these 4 wire ends together; insulate.</text>
+<text x="92" y="1005" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">1  Nano GND near VIN</text>
+<text x="92" y="1037" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">2  MPU GND</text>
+<text x="92" y="1069" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">3  MPU AD0</text>
+<text x="92" y="1101" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="23" font-weight="400" fill="#17283B">4  Thumb tape</text>
+<text x="80" y="1220" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="21" font-weight="600" fill="#17283B">G1 and G2 are labels for wire joints.</text>
+<text x="80" y="1255" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#506278">The Nano&#x27;s two GND pins are connected</text>
+<text x="80" y="1284" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#506278">internally. The USB cable also carries GND.</text>
+<rect x="65" y="1400" width="1970" height="125" rx="14" fill="#FFF2DF" stroke="#D7A75A" stroke-width="2"/>
+<text x="90" y="1420" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="24" font-weight="600" fill="#7B3B00">REMOVE THE OLD NANO VUSB -&gt; CAMERA 5V WIRE before using this battery circuit.</text>
+<text x="90" y="1461" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="22" font-weight="400" fill="#17283B">To program/test the Nano: unplug its PowerBoost USB cable and connect the laptop&#x27;s USB data cable instead.</text>
+<text x="90" y="1494" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#17283B">Keep the camera powered by the PowerBoost. Never join the laptop USB 5V supply to the PowerBoost output.</text>
+<text x="65" y="1555" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#506278">Pin labels are schematic labels, not physical pin positions. Build with battery and USB disconnected; plug the battery in last.</text>
+<text x="65" y="1588" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="20" font-weight="400" fill="#506278">Circuit checked against manufacturer documentation. Combined battery operation and motion/click hardware are not yet bench-tested.</text>
+<text x="65" y="1621" dominant-baseline="text-before-edge" text-anchor="start" font-family="Segoe UI, sans-serif" font-size="18" font-weight="400" fill="#506278">Sources and full numbered connection list: firmware/README.md  |  24 October 2026</text>
+</svg>

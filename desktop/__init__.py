@@ -1,1 +1,0 @@
-"""Cross-platform Synchro window."""

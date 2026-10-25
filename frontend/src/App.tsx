@@ -1,4 +1,5 @@
 import { NavLink, Route, Routes, useSearchParams } from 'react-router-dom'
+import { HardwareDeck } from './components/HardwareDeck'
 import { CameraPage } from './pages/CameraPage'
 import { GesturesPage } from './pages/GesturesPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -18,7 +19,7 @@ export function App() {
       {!insideMacApp && <aside className="sidebar">
         <div className="brand">
           <strong>Synchro</strong>
-          <span>Camera and gestures</span>
+          <span>Camera, glove, and speech</span>
         </div>
         <nav className="nav">
           <NavLink to="/" end>Camera</NavLink>
@@ -31,6 +32,7 @@ export function App() {
         </nav>
       </aside>}
       <main className="main">
+        <HardwareDeck />
         <Routes>
           <Route path="/" element={<CameraPage />} />
           <Route path="/gestures" element={<GesturesPage />} />

@@ -170,7 +170,7 @@ final class SynchroShell: NSObject {
             .foregroundColor: SynchroTheme.text,
             .kern: -0.54
         ])
-        let caption = NSTextField(labelWithString: "Camera and gestures")
+        let caption = NSTextField(labelWithString: "Camera, glove, and speech")
         caption.font = .systemFont(ofSize: 12, weight: .regular)
         caption.textColor = SynchroTheme.muted
         let brandBlock = NSStackView(views: [brand, caption])

@@ -6,8 +6,6 @@ The Mac app speaks **Bluetooth Classic RFCOMM** to the existing Synchro-Cam firm
 
 ## What the original viewer does
 
-The checkpoint in `synchro_mac/original/` is the unmodified teammate drop.
-
 - Device address `70:4B:CA:46:52:22`, display name Synchro-Cam-BT, RFCOMM channel 1.
 - After the channel opens, the Mac sends `STATUS\n`.
 - The camera answers with one JSON line. The viewer accepts `firmware` of `bluetooth-1` or `bluetooth-2` and `camera_ready: true`.
@@ -20,7 +18,7 @@ The checkpoint in `synchro_mac/original/` is the unmodified teammate drop.
 - `Info.plist` includes `NSBluetoothAlwaysUsageDescription` and `NSBluetoothPeripheralUsageDescription`. The launcher ad-hoc signs the app so macOS can attach a Bluetooth privacy prompt to it.
 - `Start-Mac.command` checks Darwin and the Command Line Tools, compiles into a local `.app`, and ad-hoc signs that bundle. It does not delete user files or flash the ESP32.
 
-`PAIRING.txt` stays on this Mac and is gitignored. It is not in the checkpoint.
+`PAIRING.txt` stays on this Mac and is gitignored.
 
 ## What the Mac can change, and what it cannot
 
@@ -30,4 +28,4 @@ Firmware would have to change before any of these are possible: a smaller or qua
 
 ## Local frame handoff
 
-The current viewer listens on `127.0.0.1:8765` after it launches. `GET /status` reports whether its existing RFCOMM session is live. `GET /frame.jpg` returns the latest JPEG from that session, or 503 when the session is down or the frame is stale. The browser calls FastAPI, and FastAPI calls this socket. Nothing in that path opens Bluetooth. The checkpoint in `original/` does not listen on this port. Quit the viewer to release the radio, the same as before.
+The current viewer listens on `127.0.0.1:8765` after it launches. `GET /status` reports whether its existing RFCOMM session is live. `GET /frame.jpg` returns the latest JPEG from that session, or 503 when the session is down or the frame is stale. The browser calls FastAPI, and FastAPI calls this socket. Nothing in that path opens Bluetooth. Quit the viewer to release the radio.

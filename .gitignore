@@ -1,16 +1,20 @@
-.venv/
+.build/
+.local/
+backups/
+firmware/SynchroCam/secrets.h
+firmware/SynchroCamBluetooth/secrets.h
 __pycache__/
-.pytest_cache/
+
+.venv/
+*.zip
 node_modules/
 dist/
+.pytest_cache/
 .env
 .env.*
 !.env.example
 data/*.jsonl
 data/*.sqlite3
-models/*.joblib
 .DS_Store
-
-# Local Bluetooth pairing PIN for the ESP32-CAM. Do not commit.
 PAIRING.txt
 camera/**/*.app/

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { GloveMetrics } from '../components/GloveMetrics'
 import {
   MAX_RECORDING_MS,
   audioFilename,
@@ -38,7 +37,7 @@ export function CameraPage() {
   const [message, setMessage] = useState('Checking the local camera bridge.')
   const [image, setImage] = useState<ImageChoice | null>(null)
   const [resolution, setResolution] = useState('—')
-  const [rotated, setRotated] = useState(false)
+  const [rotated, setRotated] = useState(true)
   const [question, setQuestion] = useState('')
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
@@ -47,6 +46,14 @@ export function CameraPage() {
   const [result, setResult] = useState<VisionAnswer | null>(null)
   const [speaking, setSpeaking] = useState(false)
   const [configured, setConfigured] = useState<boolean | null>(null)
+  const [followLive, setFollowLive] = useState(true)
+
+  function showLive(blob: Blob) {
+    const url = URL.createObjectURL(blob)
+    if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    previewRef.current = url
+    setImage({ blob, source: 'camera', name: 'live.jpg', url })
+  }
 
   function remember(blob: Blob, source: ImageChoice['source'], name: string) {
     const url = URL.createObjectURL(blob)
@@ -74,7 +81,9 @@ export function CameraPage() {
 
   useEffect(() => {
     void refresh()
+    const timer = window.setInterval(() => void refresh(), 2000)
     return () => {
+      window.clearInterval(timer)
       sessionRef.current += 1
       window.speechSynthesis?.cancel()
       if (timerRef.current !== null) window.clearInterval(timerRef.current)
@@ -82,6 +91,25 @@ export function CameraPage() {
       if (previewRef.current) URL.revokeObjectURL(previewRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (!followLive || !bridge?.capture_ready) return
+    let stopped = false
+    async function pull() {
+      try {
+        const blob = await api.previewFrame()
+        if (!stopped) showLive(blob)
+      } catch {
+        /* The bridge reports readiness before the next JPEG arrives. */
+      }
+    }
+    void pull()
+    const timer = window.setInterval(() => void pull(), 400)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+    }
+  }, [followLive, bridge?.capture_ready])
 
   function stopClock() {
     if (timerRef.current !== null) {
@@ -180,6 +208,7 @@ export function CameraPage() {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
+    setFollowLive(false)
     remember(file, 'upload', file.name || 'upload.jpg')
     setError(null)
   }
@@ -188,6 +217,7 @@ export function CameraPage() {
     setBusy('capture')
     setError(null)
     try {
+      setFollowLive(false)
       const blob = await api.captureFrame()
       remember(blob, 'camera', 'camera.jpg')
     } catch (err) {
@@ -248,7 +278,9 @@ export function CameraPage() {
   const canAsk = canSubmitQuestion({ hasImage: Boolean(image), question, busy: working })
   const canCapture = captureEnabled(bridge, busy !== null)
   const sourceLabel = image?.source === 'camera'
-    ? 'Native viewer JPEG. Not a simulated frame.'
+    ? followLive
+      ? 'Live JPEG from the Bluetooth camera. Not a simulated frame.'
+      : 'Captured JPEG from the Bluetooth camera. Not a simulated frame.'
     : image?.source === 'upload'
       ? 'Uploaded image. Not a simulated frame.'
       : 'No image yet. Nothing on this page is a simulated camera frame.'
@@ -258,7 +290,7 @@ export function CameraPage() {
       <div className="page-head">
         <div>
           <h1>Camera</h1>
-          <p>Ask about an uploaded photo, or capture a JPEG when the native viewer is live.</p>
+          <p>Same camera page on Mac and Windows. Live video comes from the Bluetooth camera already connected on this computer.</p>
         </div>
         <div className="pill">
           <span className={`dot ${tone}`} />
@@ -285,9 +317,9 @@ export function CameraPage() {
         )}
       </div>
       <p className="note">{sourceLabel}</p>
-      <GloveMetrics />
       <div className="toolbar">
         <div className="group">
+          <button className="ghost" type="button" onClick={() => setFollowLive(true)}>Live camera</button>
           <button className="ghost" type="button" onClick={() => void refresh()}>Refresh</button>
           <button className="ghost" type="button" onClick={() => fileRef.current?.click()} disabled={busy !== null}>
             Upload Image

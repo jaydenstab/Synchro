@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 
 // Native macOS viewer for the existing Synchro-Cam Bluetooth Classic firmware.
 // Framing and statistics live in Sources/ so they can be tested without a radio.
-// The unmodified teammate drop is in original/.
 // JPEG decode runs off the main thread. Status text and the image view stay on main.
 final class CameraApp: NSObject, NSApplicationDelegate, IOBluetoothRFCOMMChannelDelegate {
     let address = "70:4B:CA:46:52:22"

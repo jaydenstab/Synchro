@@ -22,14 +22,14 @@ def test_simulated_camera_protocol_suite():
     assert "failed: 0" in result.stdout
 
 
-def test_original_viewer_checkpoint_is_intact():
-    original = (CAMERA / "original" / "SynchroCamera.swift").read_text()
-    assert "openRFCOMMChannelAsync" in original
-    assert "JPEG_BEGIN" in original
-    assert "JPEG_END" in original
-    assert 'send("STATUS\\n")' in original
-    assert 'send("CAPTURE\\n")' in original
-    assert not (CAMERA / "original" / "PAIRING.txt").exists()
+def test_viewer_still_speaks_the_camera_protocol():
+    viewer = (CAMERA / "SynchroCamera.swift").read_text()
+    protocol = (CAMERA / "Sources" / "SynchroProtocol.swift").read_text()
+    assert "openRFCOMMChannelAsync" in viewer
+    assert "STATUS" in viewer
+    assert "CAPTURE" in viewer
+    assert "JPEG_BEGIN" in protocol
+    assert "JPEG_END" in protocol
 
 
 def test_pairing_secret_is_not_copied_into_source_or_docs():
@@ -52,9 +52,6 @@ def test_pairing_secret_is_not_copied_into_source_or_docs():
     for path in roots:
         if secret in path.read_text():
             raise AssertionError(f"{path.relative_to(ROOT)} contains the Bluetooth pairing PIN")
-    for path in (CAMERA / "original").iterdir():
-        if secret in path.read_text(errors="ignore"):
-            raise AssertionError(f"checkpoint {path.name} contains the Bluetooth pairing PIN")
     for path in CAMERA.rglob("*.swift"):
         if "original" in path.parts:
             continue

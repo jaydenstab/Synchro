@@ -84,6 +84,42 @@ export type MotionStatus = {
   calibration_note: string
   calibrate_enabled: boolean
   simulated: boolean
+  pointer?: PointerStatus
+  speech?: SpeechStatus | null
+}
+
+export type PointerStatus = {
+  enabled: boolean
+  available: boolean
+  message: string
+  speed: number
+  invert_x: boolean
+  invert_y: boolean
+  auto_enable: boolean
+  stabilized: boolean
+  sideways_axis: string
+  left_clicks: number
+  right_clicks: number
+  manual_pause: boolean
+}
+
+export type SpeechStatus = {
+  listening: boolean
+  status: string
+  model: string
+  device: string | null
+  level: number
+  voice: boolean
+  results: number
+  dropped: number
+  latency_ms: number | null
+  error: string | null
+  text: string
+}
+
+export type SpeechDevice = {
+  id: number | null
+  label: string
 }
 
 export type CameraBridge = {

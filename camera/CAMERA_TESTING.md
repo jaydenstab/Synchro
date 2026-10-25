@@ -4,7 +4,7 @@ The ESP32-CAM is a separate machine from this repository. Numbers in `camera/syn
 
 The pairing PIN is in `camera/synchro_mac/PAIRING.txt` on this Mac. That file is gitignored. Do not copy the PIN into a screenshot, commit, or public note.
 
-Only one program may hold the camera. Quit the Windows viewer before the Mac viewer, and quit the original checkpoint app before the new one.
+Only one program may hold the camera. Quit the Windows viewer before the Mac viewer.
 
 ## 1. Build and launch the Mac viewer
 
@@ -17,14 +17,6 @@ bash camera/synchro_mac/Start-Mac.command
 ```
 
 The script compiles `Synchro Camera.app` next to itself, ad-hoc signs that bundle, and opens it. Allow the Bluetooth prompt. If macOS already denied Bluetooth, allow **Synchro Camera** in System Settings > Privacy & Security > Bluetooth, then relaunch.
-
-To rebuild the unmodified teammate viewer instead:
-
-```bash
-bash camera/synchro_mac/original/Start-Mac.command
-```
-
-Do not run both apps at once.
 
 Simulated protocol tests, with no radio:
 
@@ -86,16 +78,7 @@ Press **Export Performance CSV** before you press Start again. Start and **Reset
 
 The CSV header must say `# origin: mac-viewer` and `# simulated: false` when it came from this app. Simulated unit tests write `# origin: simulated` if they call the same exporter. Do not mix those files when you compare a hardware run.
 
-## 9. Compare before and after the viewer changes
-
-1. Quit every viewer.
-2. Run the checkpoint app from `camera/synchro_mac/original/` and read the single status-line FPS for a still scene and a moving scene. That number is the 3-second average. The checkpoint has no CSV.
-3. Quit it, launch the new viewer, and export a CSV for the same two scenes.
-4. Compare the new **Average FPS (3s)** column with the checkpoint status line. Compare **Request-to-frame** only on the new viewer. The checkpoint did not record it.
-
-A higher number counts only if both runs used the same camera, power, distance, and scene. A change that shows up only in the simulated tests is not a camera FPS change.
-
-## 10. Hand a frame to the browser
+## 9. Hand a frame to the browser
 
 Start this viewer and press Start so the picture is live. Then open the Synchro Camera page at http://127.0.0.1:8000 and press Capture Photo. The page should show the same scene. The browser does not pair with the camera. If Capture Photo says the bridge is unavailable, the viewer is not running or its session is not live. The simulated tests check the localhost handoff with fake bytes; they do not prove the radio works.
 

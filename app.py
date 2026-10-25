@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -56,6 +57,21 @@ class StartRecordingRequest(BaseModel):
     session_id: str | None = None
 
 
+class PointerUpdate(BaseModel):
+    enabled: bool | None = None
+    recenter: bool = False
+    speed: float | None = None
+    invert_x: bool | None = None
+    invert_y: bool | None = None
+    auto_enable: bool | None = None
+    stabilize: bool | None = None
+    sideways_axis: str | None = None
+
+
+class SpeechStart(BaseModel):
+    device: int | None = None
+
+
 def _http_error(exc: Exception, not_found: bool = False) -> HTTPException:
     if isinstance(exc, KeyError) or not_found:
         return HTTPException(404, str(exc) if str(exc) else 'Not found')
@@ -81,12 +97,24 @@ def create_app(data_dir: Path | None = None, assistant: AssistantService | None 
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        windows_camera = None
         if os.environ.get('VISIONGLOVE_MOTION_USB', '1') == '1':
             motion.start_usb()
+            if os.environ.get('SYNCHRO_SPEECH_LISTEN') == '1':
+                try:
+                    motion.speech_start(None)
+                except ValueError:
+                    pass
+        if os.environ.get('SYNCHRO_WINDOWS_CAMERA', '1' if sys.platform == 'win32' else '0') == '1':
+            from camera.windows_bridge import WindowsCameraBridge
+            windows_camera = WindowsCameraBridge.from_env()
+            windows_camera.start()
         task = asyncio.create_task(feed.run())
         try:
             yield
         finally:
+            if windows_camera is not None:
+                windows_camera.close()
             motion.close()
             feed.stop()
             task.cancel()
@@ -132,6 +160,49 @@ def create_app(data_dir: Path | None = None, assistant: AssistantService | None 
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         return motion.snapshot()
+
+    @app.post('/api/pointer')
+    def update_pointer(req: PointerUpdate):
+        try:
+            motion.update_pointer(
+                enabled=req.enabled,
+                recenter=req.recenter,
+                speed=req.speed,
+                invert_x=req.invert_x,
+                invert_y=req.invert_y,
+                auto_enable=req.auto_enable,
+                stabilize=req.stabilize,
+                sideways_axis=req.sideways_axis,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return motion.snapshot()
+
+    @app.get('/api/speech')
+    def speech_status():
+        return motion.speech_snapshot()
+
+    @app.get('/api/speech/devices')
+    def speech_devices():
+        return motion.speech_devices()
+
+    @app.post('/api/speech/start')
+    def speech_start(req: SpeechStart):
+        try:
+            motion.speech_start(req.device)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return motion.speech_snapshot()
+
+    @app.post('/api/speech/stop')
+    def speech_stop():
+        motion.speech_stop()
+        return motion.speech_snapshot()
+
+    @app.post('/api/speech/clear')
+    def speech_clear():
+        motion.speech_clear()
+        return motion.speech_snapshot()
 
     @app.get('/api/status')
     def status():

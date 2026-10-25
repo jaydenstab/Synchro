@@ -8,6 +8,8 @@ import type {
   Status,
   TrainResult,
   MotionStatus,
+  SpeechDevice,
+  SpeechStatus,
   Transcript,
   VisionAnswer,
 } from './types'
@@ -76,6 +78,18 @@ export const api = {
   cameraBridge: () => request<CameraBridge>('/api/camera/bridge'),
   motion: () => request<MotionStatus>('/api/motion'),
   calibrateMotion: () => request<MotionStatus>('/api/motion/calibrate', { method: 'POST' }),
+  updatePointer: (body: Record<string, unknown>) => request<MotionStatus>('/api/pointer', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }),
+  speech: () => request<SpeechStatus>('/api/speech'),
+  speechDevices: () => request<{ devices: SpeechDevice[]; error: string | null }>('/api/speech/devices'),
+  startSpeech: (device: number | null) => request<SpeechStatus>('/api/speech/start', {
+    method: 'POST',
+    body: JSON.stringify({ device }),
+  }),
+  stopSpeech: () => request<SpeechStatus>('/api/speech/stop', { method: 'POST' }),
+  clearSpeech: () => request<SpeechStatus>('/api/speech/clear', { method: 'POST' }),
   gestures: () => request<{ gestures: Gesture[] }>('/api/gestures'),
   createGesture: (name: string) => request<Gesture>('/api/gestures', { method: 'POST', body: JSON.stringify({ name }) }),
   renameGesture: (id: string, name: string) => request<Gesture>(`/api/gestures/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
@@ -109,20 +123,23 @@ export const api = {
     form.append('audio', blob, filename)
     return upload<Transcript>('/api/assistant/transcribe', form)
   },
-  captureFrame: async () => {
-    let response: Response
-    try {
-      response = await fetch('/api/camera/capture', { cache: 'no-store' })
-    } catch {
-      throw new ApiError(0, 'Backend offline')
-    }
-    if (!response.ok) {
-      await readBody<never>(response)
-    }
-    const type = response.headers.get('content-type') || ''
-    if (!type.includes('image/jpeg')) {
-      throw new ApiError(502, 'The camera bridge did not return a JPEG.', 'invalid_image')
-    }
-    return response.blob()
-  },
+  previewFrame: () => fetchJpeg('/api/camera/preview'),
+  captureFrame: () => fetchJpeg('/api/camera/capture'),
+}
+
+async function fetchJpeg(path: string): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(path, { cache: 'no-store' })
+  } catch {
+    throw new ApiError(0, 'Backend offline')
+  }
+  if (!response.ok) {
+    await readBody<never>(response)
+  }
+  const type = response.headers.get('content-type') || ''
+  if (!type.includes('image/jpeg')) {
+    throw new ApiError(502, 'The camera bridge did not return a JPEG.', 'invalid_image')
+  }
+  return response.blob()
 }

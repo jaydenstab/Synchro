@@ -2,7 +2,7 @@
 
 Native Bluetooth Classic viewer for the existing Synchro-Cam firmware. The picture is rotated 180° by default. Uncheck **Rotate 180°** to show the camera's orientation. The saved JPEG is always the original bytes.
 
-The unmodified drop is in `original/`. Hardware steps are in `../CAMERA_TESTING.md`. Protocol tests in `Tests/` are simulated and are not camera measurements.
+Hardware steps are in `../CAMERA_TESTING.md`. Protocol tests in `Tests/` are simulated and are not camera measurements.
 
 The window is the whole Synchro app. Camera is this native viewer. Gestures, Test, and Settings open the local service in the same window, without a second sidebar. The browser at http://127.0.0.1:8000 still has those pages, including a camera page that cannot connect to Bluetooth.
 

@@ -1,8 +1,8 @@
 """Live glove metrics shared by the Mac window and the browser on either OS.
 
-USB reads NanoMotionAngles. The panel shows roll, pitch, relative yaw, the
-index and middle contacts, the link line, and stationary-calibration state.
-Angles stay empty until a real packet arrives.
+The running service uses the teammate stack in tools/: USB or Bluetooth LE,
+stationary calibration, the Windows pointer, and local speech. Packet injection
+below is for tests. Angles stay empty until a real packet arrives.
 """
 from __future__ import annotations
 
@@ -22,8 +22,6 @@ from motion.synimu import (
     scaled,
 )
 
-NANO_VID = 0x2341
-NANO_PIDS = (0x0070, 0x0071)
 FRESH_SECONDS = 0.5
 CLIP = 32760
 
@@ -35,8 +33,6 @@ class MotionService:
         self._lock = threading.Lock()
         self._reader = PacketReader()
         self._filter = Orientation()
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
         self._status = 'Looking for Nano USB...'
         self._transport: str | None = None
         self._connected = False
@@ -62,20 +58,26 @@ class MotionService:
         self._sample_hz = 0.0
         self._packet_errors = 0
         self._axes: tuple[float, float, float, float, float, float] | None = None
+        self._hardware = None
+        self._speech = None
         self._load_profile()
 
     def start_usb(self) -> None:
-        if self._thread and self._thread.is_alive():
+        """Open the glove over USB or BLE and start pointer control."""
+        if self._hardware is not None:
             return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._usb_loop, name='synchro-motion', daemon=True)
-        self._thread.start()
+        from motion.host import session_from_env
+        self._hardware = session_from_env()
+        self._speech = self._hardware.speech
+        self._hardware.start()
 
     def close(self) -> None:
-        self._stop.set()
-        thread = self._thread
-        if thread and thread.is_alive():
-            thread.join(timeout=1.5)
+        hardware = self._hardware
+        self._hardware = None
+        if hardware is not None:
+            hardware.close()
+        if self._speech is not None and hardware is None:
+            self._speech.stop()
 
     def ingest_bytes(self, data: bytes, *, now: float | None = None, transport: str | None = None) -> None:
         moment = time.monotonic() if now is None else now
@@ -91,6 +93,9 @@ class MotionService:
                 self._apply(packet, moment)
 
     def request_calibration(self, now: float | None = None) -> None:
+        if self._hardware is not None:
+            self._hardware.sensor.request_calibration()
+            return
         moment = time.monotonic() if now is None else now
         with self._lock:
             fresh = self._connected and moment - self._last_rx < FRESH_SECONDS
@@ -105,6 +110,8 @@ class MotionService:
             self._calibration = {'state': 'running', 'progress': 0.0, 'message': None}
 
     def snapshot(self, now: float | None = None) -> dict:
+        if self._hardware is not None:
+            return self._hardware.snapshot()
         moment = time.monotonic() if now is None else now
         with self._lock:
             fresh = self._connected and moment - self._last_rx < FRESH_SECONDS
@@ -135,7 +142,88 @@ class MotionService:
                 'packet_errors': self._packet_errors,
                 'axes': list(self._axes) if fresh and self._axes is not None else None,
                 'simulated': False,
+                'pointer': self._idle_pointer(),
+                'speech': self.speech_snapshot(),
             }
+
+    def update_pointer(
+        self,
+        *,
+        enabled: bool | None = None,
+        recenter: bool = False,
+        speed: float | None = None,
+        invert_x: bool | None = None,
+        invert_y: bool | None = None,
+        auto_enable: bool | None = None,
+        stabilize: bool | None = None,
+        sideways_axis: str | None = None,
+    ) -> None:
+        if self._hardware is None:
+            raise ValueError('The glove link is not running.')
+        pointer = self._hardware.pointer
+        current = pointer.snapshot()
+        axis_index = None
+        if sideways_axis is not None:
+            if sideways_axis not in ('X', 'Y'):
+                raise ValueError('Choose sideways axis X or Y.')
+            axis_index = 0 if sideways_axis == 'X' else 1
+        if any(value is not None for value in (speed, invert_x, invert_y, auto_enable, stabilize, sideways_axis)):
+            pointer.configure(
+                current['speed'] if speed is None else speed,
+                current['invert_x'] if invert_x is None else invert_x,
+                current['invert_y'] if invert_y is None else invert_y,
+                auto_enable=current['auto_enable'] if auto_enable is None else auto_enable,
+                stabilize=current['stabilized'] if stabilize is None else stabilize,
+                sideways_axis=axis_index,
+            )
+        if recenter:
+            pointer.recenter()
+        if enabled is True:
+            pointer.enable()
+        elif enabled is False:
+            pointer.disable()
+
+    def speech_snapshot(self) -> dict:
+        controller = self._speech_controller()
+        if controller is None:
+            from motion.host import idle_speech
+            return idle_speech()
+        return controller.snapshot(include_text=True)
+
+    def speech_devices(self) -> dict:
+        from motion.host import speech_devices
+        return speech_devices()
+
+    def speech_start(self, device: int | None = None) -> None:
+        controller = self._speech_controller()
+        if controller is None:
+            raise ValueError('Local speech is not available.')
+        try:
+            controller.start(device)
+        except Exception as exc:
+            raise ValueError(str(exc)) from exc
+
+    def speech_stop(self) -> None:
+        controller = self._speech_controller()
+        if controller is not None:
+            controller.stop()
+
+    def speech_clear(self) -> None:
+        controller = self._speech_controller()
+        if controller is not None:
+            controller.clear()
+
+    def _speech_controller(self):
+        if self._hardware is not None:
+            return self._hardware.speech
+        if self._speech is None:
+            from motion.host import speech_controller
+            self._speech = speech_controller()
+        return self._speech
+
+    def _idle_pointer(self) -> dict:
+        from motion.host import idle_pointer
+        return idle_pointer()
 
     def _apply(self, packet: Packet, now: float) -> None:
         if self._seen_packet and (
@@ -265,70 +353,3 @@ class MotionService:
             self._calibrated = True
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             self._calibrated = False
-
-    def _usb_loop(self) -> None:
-        try:
-            import serial
-            from serial.tools import list_ports
-        except ImportError:
-            with self._lock:
-                self._status = 'Install pyserial to read the Nano.'
-                self._connected = False
-            return
-        while not self._stop.is_set():
-            matches = [
-                port for port in list_ports.comports()
-                if port.vid == NANO_VID and port.pid in NANO_PIDS
-            ]
-            if len(matches) != 1:
-                with self._lock:
-                    self._connected = False
-                    self._ready = False
-                    self._transport = None
-                    self._status = (
-                        'Looking for Nano USB...'
-                        if not matches else
-                        'Multiple Nanos found. Unplug the extra board.'
-                    )
-                self._stop.wait(0.4)
-                continue
-            info = matches[0]
-            try:
-                connection = serial.Serial(port=None, baudrate=115200, timeout=0.1)
-                connection.dtr = False
-                connection.rts = False
-                connection.port = info.device
-                connection.open()
-                connection.dtr = True
-                connection.rts = True
-                connection.reset_input_buffer()
-            except Exception as exc:
-                with self._lock:
-                    self._connected = False
-                    self._status = f'USB did not open: {exc}'
-                self._stop.wait(0.8)
-                continue
-            with self._lock:
-                self._reader = PacketReader()
-                self._transport = 'USB'
-                self._connected = True
-                self._link_started = time.monotonic()
-                self._status = 'USB connected'
-            try:
-                while not self._stop.is_set():
-                    data = connection.read(4096)
-                    if data:
-                        self.ingest_bytes(data)
-            except Exception as exc:
-                with self._lock:
-                    self._status = f'USB stopped: {exc}'
-            finally:
-                try:
-                    connection.close()
-                except Exception:
-                    pass
-                with self._lock:
-                    self._connected = False
-                    self._ready = False
-                    if self._status == 'USB connected':
-                        self._status = 'Looking for Nano USB...'
