@@ -1,8 +1,11 @@
 # MPU angles and contacts in the camera viewer
 
+Run commands from the project root unless a section says otherwise.
+
 The Windows camera viewer now combines the camera's existing Bluetooth video
 with USB or Bluetooth Low Energy telemetry from the Nano ESP32. The camera firmware is unchanged.
-The native Mac camera viewer has not been extended with this motion panel.
+The separate Mac app has been removed. Use `--preview` on a Mac to inspect the
+Windows interface without opening hardware; both main tabs remain visible.
 
 ## Wiring and programs
 
@@ -27,12 +30,13 @@ MPU INT/XDA/XCL remain unused. Pin names are the Nano's printed Arduino labels.
   debouncing on the Nano; replaces `NanoMotionTest` when uploaded.
 - `../tools/motion_core.py`: double-precision quaternion angle estimator and
   calibration checks on the laptop.
-- `../tools/motion_sensor.py`: USB reader, saved calibration, local control API.
+- `../tools/motion_sensor.py`: USB/BLE reader, saved calibration, local control API.
 - `../tools/motion_panel.py`: roll/pitch/relative yaw, held/released/TAP indicators,
   cumulative press counts, sample rate, and calibration progress in the viewer.
 - `../tools/Calibrate-Motion.ps1`: readiness/calibration entry point.
 
-These indicators do not generate OS mouse clicks. Counts are debounced press
+The indicators only display contacts; the separate pointer controller generates
+Windows button events when pointer control is enabled. Counts are debounced press
 edges since Nano boot; both press and release debounce is 25 ms. A latched
 counter catches taps between UI refreshes. A tap shorter than the debounce
 interval is intentionally rejected. Stale data is shown as unavailable.
@@ -187,16 +191,23 @@ Touches made while paused are discarded. Regression tests cover held-angle
 position, return to neutral, reversal, tracking recovery, hold/release dragging,
 scroll direction and noise, chord transitions, and releasing buttons on lost data.
 
-## Verification
+## Verification and historical evidence
 
-The direct-position and automatic-recovery update passes all **55 automated
-tests**. Regressions cover held-angle position, linear sensitivity, return to
+The observations below came from earlier hardware-branch sessions. Test counts
+refer to those revisions, not the present suite. Local evidence files are not
+included in source packages. The current implementation requires **Pause pointer**;
+older references to Esc stopping the pointer describe superseded behavior.
+Run the root README's test commands for the current source. Desktop tests use
+fixtures and stubbed OS input; a passing Mac run is not Windows hardware acceptance.
+
+The earlier direct-position and automatic-recovery update passed **55 automated
+tests** at that revision. Regressions cover held-angle position, linear sensitivity, return to
 neutral after reaching screen edges, reference preservation through tracking
 resets, near-vertical recovery, and preventing queued clicks on resume. Sensor
 clipping now resets the filter once per episode instead of once per clipped
 sample, and remains an explicit invalid-reading/calibration-failure condition.
 
-The finger-click update passes all 47 automated tests, including one click per
+The earlier finger-click update passed 47 automated tests, including one click per
 held touch, brief taps, pause/re-enable, stale data, counter wrap/reset, and the
 Windows press/release structures and failure handling. Native click tests use
 a stubbed SendInput function; they do not inject real desktop clicks. The updated
@@ -208,7 +219,8 @@ The Windows pointer feature passed all 36 automated motion tests (including
 conditions). With the saved gyro calibration loaded, a live 20-second BLE check
 received 40/40 fresh status readings at about 1,002 samples/sec. Windows pointer
 updates succeeded and the sampled cursor readback contained 14 distinct positions.
-Pressing Esc then disabled control and stopped further movement events.
+In that older revision, pressing Esc disabled control and stopped movement.
+The current revision deliberately does not stop the pointer on Esc.
 Evidence: `.local/motion-pointer-verification.json` and
 `.local/motion-pointer-stop-verification.json`. Direction comfort and sensitivity
 can be adjusted with the viewer controls for the final glove mounting.

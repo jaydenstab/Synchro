@@ -2,7 +2,8 @@
 import time
 import tkinter as tk
 from tkinter import ttk
-from desktop_theme import FONT, PANEL, INSET, TEXT, MUTED, MINT, WARN, DANGER, heading, wrap_labels
+from desktop_theme import (FONT, PANEL, INSET, TEXT, MUTED, MINT, WARN, DANGER,
+                           CHIP, SELECT, SELECT_TEXT, heading, wrap_labels)
 
 from motion_sensor import MotionSensor
 from motion_pointer import PointerController
@@ -12,7 +13,7 @@ class MotionPanel:
     def __init__(self, root, port=None, transport='auto', ble_address=None, connect=True):
         self.connect = connect
         self.sensor = MotionSensor(port, transport, ble_address)
-        self.frame = tk.Frame(root, bg='#15181b', padx=18, pady=18)
+        self.frame = tk.Frame(root, bg=PANEL, padx=18, pady=18)
         for column in range(3):
             self.frame.columnconfigure(column, weight=1)
         heading(self.frame, 'Motion & pointer', 'Connect the glove, then calibrate while holding still.').grid(row=0, column=0, columnspan=3, sticky='ew', pady=(0, 18))
@@ -26,30 +27,30 @@ class MotionPanel:
                              font=(FONT, 22, 'bold'), anchor='w')
             label.pack(fill='x', pady=(5, 0))
             self.angle_labels.append(label)
-        self.clicks = tk.Frame(self.frame, bg='#15181b')
+        self.clicks = tk.Frame(self.frame, bg=PANEL)
         self.clicks.grid(row=3, column=0, columnspan=3, sticky='ew', pady=(10, 0))
         self.contact_labels = []
         self.last_counts = [None, None]
         self.flash_until = [0.0, 0.0]
         for i in range(2):
             self.clicks.columnconfigure(i, weight=1)
-            label = tk.Label(self.clicks, text='Waiting for contacts', bg='#25353a', fg='#9aa39c',
+            label = tk.Label(self.clicks, text='Waiting for contacts', bg=CHIP, fg=MUTED,
                              font=(FONT, 10, 'bold'), padx=8, pady=7, wraplength=205)
             label.grid(row=1, column=i, padx=4, sticky='ew')
             self.contact_labels.append(label)
-        self.status = tk.Label(self.frame, text='Looking for Nano USB...', bg='#15181b', fg='#9aa39c',
+        self.status = tk.Label(self.frame, text='Looking for Nano USB...', bg=PANEL, fg=MUTED,
                                font=(FONT, 9), anchor='w', justify='left', wraplength=440)
         self.status.grid(row=4, column=0, columnspan=3, sticky='ew', pady=(10, 8))
         self.cal_button = ttk.Button(self.frame, text='Calibrate — hold still 15 s', command=self.calibrate)
         self.cal_button.grid(row=5, column=0, columnspan=2, sticky='w')
         self.progress = ttk.Progressbar(self.frame, maximum=100)
         self.progress.grid(row=5, column=2, sticky='ew', padx=4)
-        self.cal_status = tk.Label(self.frame, text='Not calibrated. Yaw can drift.', bg='#15181b',
-                                   fg='#f0b429', font=(FONT, 9), anchor='w', justify='left', wraplength=440)
+        self.cal_status = tk.Label(self.frame, text='Not calibrated. Yaw can drift.', bg=PANEL,
+                                   fg=WARN, font=(FONT, 9), anchor='w', justify='left', wraplength=440)
         self.cal_status.grid(row=6, column=0, columnspan=3, sticky='ew', pady=(7, 0))
         self.pointer = PointerController(self.sensor)
         self.sensor.pointer = self.pointer
-        self.pointer_row = tk.Frame(self.frame, bg='#15181b')
+        self.pointer_row = tk.Frame(self.frame, bg=PANEL)
         self.pointer_row.grid(row=7, column=0, columnspan=3, sticky='ew', pady=(8, 0))
         self.pointer_button = ttk.Button(self.pointer_row, text='Enable pointer', command=self.toggle_pointer, style='Primary.TButton')
         self.pointer_button.pack(side='left', padx=(0, 5))
@@ -64,12 +65,12 @@ class MotionPanel:
                         command=self.configure_pointer).pack(side='left', padx=5)
         ttk.Checkbutton(tuning, text='Reverse Y', variable=self.invert_y,
                         command=self.configure_pointer).pack(side='left', padx=5)
-        self.sensitivity_label = tk.Label(tuning, text='Sensitivity · 25 px/°', bg='#15181b', fg='#9aa39c')
+        self.sensitivity_label = tk.Label(tuning, text='Sensitivity · 25 px/°', bg=PANEL, fg=MUTED)
         self.sensitivity_label.pack(side='left', padx=3)
         self.pointer_speed = tk.DoubleVar(value=1.0)
         ttk.Scale(tuning, from_=0.25, to=2.0, variable=self.pointer_speed,
                   command=lambda _: self.configure_pointer(), length=85).pack(side='left')
-        self.pointer_status = tk.Label(self.frame, text='Pointer off', bg='#15181b', fg='#f0b429',
+        self.pointer_status = tk.Label(self.frame, text='Pointer off', bg=PANEL, fg=WARN,
                                        font=(FONT, 9), anchor='w', justify='left', wraplength=440)
         self.pointer_status.grid(row=10, column=0, columnspan=3, sticky='ew', pady=(7, 0))
         tk.Label(self.frame, text='Hold a contact to drag. Hold both contacts and tilt to scroll.',
@@ -123,7 +124,7 @@ class MotionPanel:
         angles = data['angles'] if data['ready'] else None
         for i, label in enumerate(self.angle_labels):
             label.config(text=f'{angles[i]:+.2f}°' if angles is not None else '—',
-                         fg='#f3f6f4' if angles is not None else '#9aa39c')
+                         fg=TEXT if angles is not None else MUTED)
         now = time.monotonic()
         for i, (side, name) in enumerate((('left', 'Index / LEFT CLICK'), ('right', 'Middle / RIGHT CLICK'))):
             count = data[f'{side}_presses']
@@ -135,8 +136,8 @@ class MotionPanel:
                     ('TAP' if now < self.flash_until[i] else 'released'))
             active = data['fresh'] and (down or now < self.flash_until[i])
             self.contact_labels[i].config(text=f'{name}\n{text}  ·  {count} taps',
-                                           bg='#285d46' if active else '#25353a',
-                                           fg='#d2ffe3' if active else '#9aa39c')
+                                           bg=SELECT if active else CHIP,
+                                           fg=SELECT_TEXT if active else MUTED)
         message = data['status']
         if data['fresh'] and data['ready']:
             message = (f"{data.get('transport', 'USB')}  ·  {data['sample_hz']:.0f} samples/s  ·  "

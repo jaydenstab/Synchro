@@ -16,7 +16,14 @@ class DesktopViewerTests(unittest.TestCase):
     def test_voice_test_launch_keeps_glove_tab_visible(self):
         self.check_viewer(preview=True, pause_pointer=True)
 
-    def check_viewer(self, preview, pause_pointer=False):
+    def test_camera_frame_is_displayed_with_tk_work_on_main_thread(self):
+        self.check_viewer(preview=False, live_camera=True)
+
+    def check_viewer(self, preview, pause_pointer=False, live_camera=False):
+        import threading
+        import time
+        from PIL import Image, ImageTk
+        from bluetooth_viewer import Frame
         import tkinter as tk
         from tkinter import ttk
         from bluetooth_viewer import launch_viewer
@@ -52,6 +59,20 @@ class DesktopViewerTests(unittest.TestCase):
                                 self.assertLessEqual(right, root.winfo_rootx() + root.winfo_width(), str(widget))
                                 self.assertLessEqual(bottom, root.winfo_rooty() + root.winfo_height(), str(widget))
                 observations.extend(notebook.tab(tab, 'text') for tab in notebook.tabs())
+                from desktop_theme import BANNER, BANNER_TEXT, CHIP, MUTED, PANEL
+                motion_frame = root.nametowidget(notebook.tabs()[0])
+                self.assertEqual(notebook.tab(notebook.tabs()[0], 'text'), 'Glove')
+                self.assertEqual(motion_frame.cget('bg'), PANEL)
+                contacts = [w for w in walk(motion_frame) if isinstance(w, tk.Label) and (
+                    'CLICK' in str(w.cget('text')) or w.cget('text') == 'Waiting for contacts')]
+                self.assertEqual([w.cget('bg') for w in contacts], [CHIP, CHIP])
+                self.assertEqual([w.cget('fg') for w in contacts], [MUTED, MUTED])
+                banners = [w for w in walk(root) if isinstance(w, tk.Label)
+                           and str(w.cget('text')).startswith('PREVIEW MODE')]
+                if preview:
+                    self.assertEqual([(w.cget('bg'), w.cget('fg')) for w in banners], [(BANNER, BANNER_TEXT)])
+                else:
+                    self.assertEqual(banners, [])
                 # Both transcript/conversation views and every screenshot control must survive the redesign.
                 inner = next(w for w in walk(root) if isinstance(w, ttk.Notebook) and w is not notebook)
                 self.assertEqual([inner.tab(t, 'text') for t in inner.tabs()], ['Live transcript', 'Jarvis conversation'])
@@ -69,7 +90,10 @@ class DesktopViewerTests(unittest.TestCase):
                 # The transcript now uses the themed ttk scrollbar, not a bright native Tk scrollbar.
                 self.assertFalse(any(w.winfo_class() == 'Scrollbar' for w in walk(root)))
                 buttons = {w.cget('text'): w for w in walk(root) if isinstance(w, ttk.Button)}
-                self.assertEqual(str(buttons['Save photo'].cget('state')), 'disabled')
+                self.assertEqual(str(buttons['Save photo'].cget('state')), 'normal' if live_camera else 'disabled')
+                if live_camera:
+                    self.assertTrue(any(w.cget('image') for w in walk(root) if isinstance(w, tk.Label)),
+                                    'A decoded fixture should reach the actual Tk camera preview')
                 self.assertEqual(str(buttons['Start camera'].cget('state')), 'disabled')
                 for name in ('Stop reply', 'New chat', 'Start mic'):
                     self.assertIn(name, buttons)
@@ -99,9 +123,20 @@ class DesktopViewerTests(unittest.TestCase):
             real_mainloop(root)
 
         query_devices = Mock(return_value=[])
+        main_thread = threading.get_ident()
+        image_threads = []
+        real_photo = ImageTk.PhotoImage
+        def make_photo(*args, **kwargs):
+            image_threads.append(threading.get_ident())
+            return real_photo(*args, **kwargs)
+        picture = Image.new('RGB', (640, 480), '#42785e')
+        def capture():
+            return Frame(b'fixture-only', picture, .01, time.perf_counter())
         with patch.dict('sys.modules', {'sounddevice': SimpleNamespace(query_devices=query_devices)}), \
              patch.object(tk.Tk, 'mainloop', loop), \
-             patch('bluetooth_viewer.Camera.connect', side_effect=OSError('No camera attached')) as camera_connect, \
+             patch('bluetooth_viewer.Camera.connect', side_effect=None if live_camera else OSError('No camera attached')) as camera_connect, \
+             patch('bluetooth_viewer.Camera.capture', side_effect=capture), \
+             patch('PIL.ImageTk.PhotoImage', side_effect=make_photo), \
              patch.object(MotionSensor, 'start') as sensor_start, patch.object(MotionSensor, 'close'), \
              patch.object(PointerController, 'start') as pointer_start, \
              patch('speech_stream.SpeechController.start') as speech_start, \
@@ -122,6 +157,8 @@ class DesktopViewerTests(unittest.TestCase):
                 speak.assert_not_called()
                 write.assert_not_called()
                 configure.assert_not_called()
+        self.assertTrue(image_threads)
+        self.assertTrue(all(thread == main_thread for thread in image_threads), 'Tk images must only be created on main')
         if errors:
             raise errors[0]
         self.assertEqual(observations, ['Glove', 'Speech & Jarvis'])

@@ -1,8 +1,10 @@
 # Synchro hardware and firmware
 
+Run shell commands from the project root unless a section says otherwise.
+
 ## Current motion viewer
 
-For the new 1 kHz MPU acquisition, double-precision laptop angle estimator,
+For the current 1 kHz MPU acquisition, double-precision laptop angle estimator,
 camera-window contact indicators, and 15-second calibration, see
 [MOTION.md](MOTION.md). This uses `NanoMotionAngles` on the Nano. Older
 `NanoMotionTest` bring-up results and programming-bridge wiring below are
@@ -19,7 +21,9 @@ The user confirmed the PowerBoost's USB-A output socket is soldered on.
 
 Editable drawing: `hardware/synchro-complete-wiring.svg`. Rebuild both image
 formats with `tools/draw_schematic.py` (Python + Pillow). The diagram uses
-pin labels, not physical board/header positions.
+pin labels, not physical board/header positions. Connections 16–17 in the list
+and the blue UART lines in the drawing are programming-only; keep them disconnected
+during normal camera/glove operation.
 
 ### Power arrangement
 
@@ -80,7 +84,8 @@ contact and an insulating backing.
   micro-USB input; keep the battery in its JST socket. Charge off the body.
 - **Nano programming or USB diagnostics:** remove the PowerBoost-to-Nano USB
   cable at the Nano, then plug in the laptop's USB data cable. The camera can
-  remain powered by the PowerBoost, with G1/G2 and signal wiring retained.
+  remain powered by the PowerBoost with G1/G2 grounds retained. Keep camera UART
+  wires disconnected except when programming or using NanoCamBridge diagnostics.
   Do not connect laptop USB 5V to the booster's output; do not restore the old
   VUSB-to-camera wire while the booster is attached.
 - **Camera programming:** restore `NanoCamBridge` onto the Nano first, use
@@ -100,12 +105,11 @@ This is a documented design, **not a completed combined battery hardware
 test**. The PowerBoost is nominally a 1A-class supply; simultaneous startup
 and radio/camera loads must be tested for stable operation. Do not infer
 that a successful single-board test verifies both boards under load.
-The motion/click diagnostic is now uploaded to the Nano and its initial
-MPU communication test passed over laptop USB; it does not yet generate
-laptop mouse events. Movement/tilt response has also passed. The copper
-contacts subsequently passed separate left-held, right-held, and released
-state checks over laptop USB; calibration and mouse-control firmware remain
-pending.
+During early bring-up, NanoMotionTest verified MPU communication and contact
+states without desktop mouse control. The current runtime uses NanoMotionAngles
+and the Python viewer for calibration, pointer movement, dragging and scrolling;
+see [MOTION.md](MOTION.md). This does not establish wearable comfort or combined
+load stability for every power arrangement.
 
 Camera power-path check on 2026-10-24: after the user reported connecting
 camera 5V/GND to the PowerBoost and powering the Nano via the PowerBoost's
@@ -189,7 +193,7 @@ Endpoints:
 Use only on the intended local network. The web endpoints have no
 separate login; devices knowing the Wi-Fi password can view the camera.
 
-## Upload and testing
+## Historical Wi-Fi firmware upload and testing
 
 Build outputs go in `.build/`. The camera upload uses esptool v4 with
 `--chip esp32 --port COM5 --baud 230400 --before no_reset --after no_reset_stub`.
@@ -227,7 +231,7 @@ References: [Espressif CameraWebServer](https://github.com/espressif/arduino-esp
 [boot-mode selection](https://docs.espressif.com/projects/esptool/en/latest/esp32/advanced-topics/boot-mode-selection.html),
 [Nano ESP32 datasheet](https://docs-content.arduino.cc/resources/datasheets/ABX00083-datasheet.pdf).
 
-## Bluetooth laptop viewer
+## Bluetooth laptop viewer (current camera firmware)
 
 `SynchroCamBluetooth` is a separate camera firmware, built with the same
 `esp32:esp32:esp32cam:FlashMode=dio,FlashFreq=40` configuration. It runs Bluetooth
@@ -250,8 +254,8 @@ with the configured PIN and only the camera address obtained from USB.
 Alternatively, pair `Synchro-Cam-BT` through Windows Settings with that PIN.
 `tools/bluetooth_viewer.py` opens a native RFCOMM socket to the paired camera.
 It does not use Wi-Fi, a virtual COM port, or USB for image data.
-Python's standard library and Pillow are sufficient; the bundled runtime
-already contains Pillow and Tk. Launch the app with
+The current full app also imports the glove, speech and Jarvis modules; install
+the project requirements.txt in a Python 3.12 environment with Tcl/Tk. Launch with
 `tools/Start-Bluetooth-Camera.ps1`, or run the Python viewer directly.
 
 The Windows viewer now defaults to 180-degree rotation. The Rotate 180°
@@ -263,6 +267,45 @@ and all seven existing camera protocol tests passed.
 
 The supported desktop viewer is the Windows app in `tools/bluetooth_viewer.py`.
 Use `--preview` for interface development on another operating system.
+
+### Camera probing and recorded measurements
+
+The following instructions and historical measurements were preserved from the
+hardware branch. The `.local/` and `backups/` evidence paths belong to the original
+test machine and are excluded from source distribution. These results have not
+been rerun as part of the Windows UI redesign.
+
+For a hardware test, run the viewer with `--probe 12`. It validates and
+decodes every image, saves first/last JPEGs and a timing report under
+`.local/bluetooth-test`, and exits. `tools/test_bluetooth_viewer.py` checks
+fragmented/combined packets and rejected malformed/truncated responses.
+The GUI requests one image at a time, shows a short rolling fps average,
+keeps at most one pending image, and reconnects on a link failure.
+
+The boards still require power. Keep the current USB power wiring during
+these tests. Before switching the camera to an external 5V booster, remove
+the Nano VBUS-to-camera-5V wire and retain common ground. Do not tie the
+booster's 5V output to the laptop's USB 5V supply.
+
+The working Wi-Fi v2 source and build files are preserved under
+`.local/camera-wifi-v2-baseline`; the original full-flash backup remains
+under `backups/`. Bluetooth performance must be measured on the real link;
+compilation and protocol unit tests alone do not establish throughput.
+
+Verified on 2026-10-24 with Bluetooth firmware v1 (320×240): the camera paired with Windows at Bluetooth address
+`70:4B:CA:46:52:22`, RFCOMM channel 1. A 12-frame hardware probe decoded all
+12 JPEGs at 19.68 fps (about 2.45 kB per image). The open laptop viewer,
+which limits requests to 15 fps, showed approximately 12–13 fps while the
+scene changed. These are observed results, not guaranteed rates. See
+`.local/bluetooth-test/report.json` for the probe timings.
+
+The 640×480 Bluetooth v2 upgrade was also verified on 2026-10-24: all
+60 hardware-test JPEGs decoded successfully in 10.22 seconds (5.87 fps).
+They were 11.4–12.5 kB each in that scene. The reopened viewer displayed
+640×480 and approximately 6.2 fps during visual inspection. Results are in
+`.local/bluetooth-vga-test/report.json`, with first/last test images. Its
+seven protocol tests pass, including both resolutions and mismatched
+JPEG/header dimensions. Bluetooth pairing remained intact after upload.
 
 ## Earlier USB-powered motion bring-up (reference only)
 
@@ -337,7 +380,7 @@ is missing, with `imu_ready=0` and `nan` motion/temperature values.
 
 Comments beginning with `#` report readiness and read failures. Detection
 retries every two seconds; do not change physical wiring while powered.
-The Nano now runs this diagnostic. Expect acceleration-vector
+At that stage, the Nano ran this diagnostic; current operation uses NanoMotionAngles. Expect acceleration-vector
 magnitude near 1 g while stationary, gyro values near zero apart from bias,
 and readings that change when moved. Verify each pinch separately and
 verify release returns its contact state to zero. This is a diagnostic

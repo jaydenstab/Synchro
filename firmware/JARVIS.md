@@ -1,9 +1,11 @@
 # Jarvis camera assistant
 
+Run commands from the project root unless a section says otherwise.
+
 Say **“Jarvis, what do you see?”**. When the recognized request ends with a
 **period, question mark or exclamation mark**, the app sends it and one fresh camera JPEG to Google's
 Gemini API, displays the answer in the **Jarvis conversation** tab and reads it
-aloud using the computer's Windows voice.
+aloud using the computer's Windows voice when **Read aloud** is checked.
 
 The laptop microphone, local Parakeet TDT 0.6B v2 and Silero VAD remain in use.
 Parakeet decodes speech at short local pauses. Only text after the recognized
@@ -27,6 +29,11 @@ The camera frame must be at most five seconds old and follows the viewer's
 180-degree rotation setting. A disconnected/stopped camera is omitted instead of
 sending an old frame. All requests still reach Gemini; the prompt tells it not to
 invent visual details when there is no image.
+
+The microphone starts off in a normal launch. Listen for Jarvis, Read aloud,
+and Typing & keys are checked by default. To use local dictation only,
+uncheck Listen for Jarvis before starting the microphone. In Mac `--preview`,
+these actions are disabled and no cloud request, playback, or typing occurs.
 
 ## Typing and keyboard actions in the selected text box
 
@@ -114,31 +121,43 @@ Install requirements.txt, then configure a key on the receiving Windows computer
 
 The hidden prompt saves a Windows-user-encrypted key in Git-ignored
 `.local/gemini-api-key.dpapi`. `GEMINI_API_KEY` is an environment override.
-The owner's supplied key is local and excluded from Git and share packages.
+The saved key file is excluded from Git and source packages; each Windows user
+configures their own key. The key-entry utility uses Windows DPAPI and does not
+work in the Mac preview.
 Logs and the local status endpoint exclude questions, replies, API keys and raw
 server error bodies. Requests, JPEGs and responses are held in memory; the
 activated request text (including exact dictation), previous conversation text and
 current image when available are transmitted to Google. Model plans can insert
-text and press the supported keys when Typing & keys is on.
+text and press the supported keys when Typing & keys is on. New chat clears
+conversation history.
 
-With the owner's bundled Python runtime:
+With the project .venv installed and camera configuration saved (see README):
 
 ```powershell
 .\tools\Start-Bluetooth-Camera.ps1 -Listen -PausePointer
 ```
 
 On another Windows computer, use the portable Python command in README.md,
-adding `--pause-pointer` for voice-only tests. Camera questions need a powered,
-paired camera connected to the viewer; text/key requests do not. Gemini requires internet.
+adding `--listen --pause-pointer` for voice tests. Camera questions need a powered,
+paired camera connected to the viewer; text/key requests do not. Gemini requires
+internet and a valid key.
 
-## Verification
+## Verification and historical observations
 
-The full suite passes, including wake gating, terminal punctuation without a
+The current software checks exercise fixtures and stubbed cloud/OS calls; they
+do not establish recognition accuracy, Windows rendering, or compatibility with
+every target application's text fields. Windows DPAPI and native INPUT layout
+checks require Windows and are skipped on a Mac. Use the root README's test and
+acceptance steps for the current source.
+
+Earlier hardware-branch checks covered wake gating, terminal punctuation without a
 two-second wait, partial phrases, punctuation inside a sentence, pending
 transcription, stale/missing images, rotation, cancellation, TTS echo exclusion
 and sanitized API errors. Writing tests cover exact text, conversation context,
 New chat, cancellation, focus changes, Unicode packets and blocked inputs; native
-typing uses a stubbed input function in tests. A real Gemini check generated
+typing uses a stubbed input function in tests. The following live checks are
+historical owner-machine observations from the hardware branch, not a rerun
+of the redesigned app. A real Gemini check generated
 “Hey Alex, great to see you!” and answered “Alex” on the follow-up asking the
 friend's name. Before the punctuation update, synthetic spoken
 “Jarvis, what color is the rectangle?” passed through the real Silero, Parakeet,

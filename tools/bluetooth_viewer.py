@@ -14,6 +14,11 @@ import time
 
 from PIL import Image
 
+from camera_preview import PreviewRenderer
+
+CAMERA_REFRESH_MS = 10
+CONTROL_REFRESH_MS = 30
+
 PROJECT = Path(__file__).resolve().parents[1]
 CONFIG = PROJECT / '.local' / 'bluetooth-camera.json'
 SUPPORTED_FRAME_SIZES = {(320, 240), (640, 480)}
@@ -147,7 +152,8 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     from speech_panel import SpeechPanel
     from jarvis_assistant import CameraSnapshot, JarvisAssistant
 
-    from desktop_theme import BG, PANEL, INSET, TEXT, MUTED, MINT, WARN, FONT, install_theme, wrap_labels
+    from desktop_theme import (BG, PANEL, INSET, TEXT, MUTED, MINT, WARN, FONT,
+                             BANNER, BANNER_TEXT, install_theme, wrap_labels)
 
     root = tk.Tk()
     root.title('Synchro · Windows UI preview' if preview else 'Synchro')
@@ -167,7 +173,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     mic_label.pack(side='right', padx=18)
     if preview:
         tk.Label(root, text='PREVIEW MODE   Hardware, microphone and Jarvis actions are disabled on this computer.',
-                 bg='#1b2822', fg='#b7cbbc', font=(FONT, 10), anchor='w', padx=14, pady=9
+                 bg=BANNER, fg=BANNER_TEXT, font=(FONT, 10), anchor='w', padx=14, pady=9
                  ).grid(row=1, column=0, sticky='ew', padx=24, pady=(0, 12))
     panes = ttk.Panedwindow(root, orient='horizontal')
     panes.grid(row=2, column=0, sticky='nsew', padx=24, pady=(0, 18))
@@ -221,21 +227,16 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     rotated = tk.BooleanVar(value=rotation == 180)
     camera_snapshot = CameraSnapshot()
     assistant = JarvisAssistant(camera_snapshot)
+    renderer = PreviewRenderer()
 
     def oriented_picture():
         picture = state['frame'].image
         return picture.transpose(Image.Transpose.ROTATE_180) if rotated.get() else picture
 
     def render_picture():
-        if state['frame'] is None:
-            return
-        picture = oriented_picture()
-        width, height = picture.size
-        scale = min(max(4, image_label.winfo_width() - 4) / width,
-                    max(4, image_label.winfo_height() - 4) / height)
-        picture = picture.resize((max(1, round(width * scale)), max(1, round(height * scale))), Image.Resampling.BILINEAR)
-        state['photo'] = ImageTk.PhotoImage(picture)
-        image_label.config(image=state['photo'], text='')
+        # Read Tk geometry on main; prepare display pixels on the worker.
+        renderer.configure(max(1, image_label.winfo_width() - 4),
+                           max(1, image_label.winfo_height() - 4), rotated.get())
 
     root.after_idle(lambda: panes.sashpos(0, max(400, root.winfo_width() - 560)))
 
@@ -299,6 +300,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         while not frames.empty():
             frames.get_nowait()
         timings.clear()
+        renderer.clear()
         state['frame'] = None
         state['photo'] = None
         image_label.config(image='', text='Connecting to camera…')
@@ -320,6 +322,9 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         camera = state['camera']
         if camera:
             camera.close()
+        renderer.clear()
+        if state['frame'] is not None:
+            renderer.submit(state['frame'])
         stop_button.config(state='disabled')
         status_text.set('Camera stopped. Glove and speech remain available.')
         connection_text.set('●  Stopped')
@@ -349,7 +354,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
     save_button = ttk.Button(buttons, text='Save photo', command=snapshot, state='disabled')
     save_button.pack(side='left', padx=5)
 
-    def update():
+    def update_camera():
         if state['closing']:
             return
         running = state['stop'] and not state['stop'].is_set()
@@ -360,6 +365,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
                 connection_text.set('●  Reconnecting' if 'unavailable' in text else '●  Connected')
                 connection_label.config(fg=WARN if 'unavailable' in text else MINT)
                 if 'unavailable' in text:
+                    renderer.clear()
                     state['frame'] = None
                     state['photo'] = None
                     image_label.config(image='', text='Camera unavailable\nCheck power and Windows Bluetooth pairing. Retrying…')
@@ -379,7 +385,7 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
             state['frame'] = frame
             camera_snapshot.update(frame, rotated.get())
             width, height = frame.image.size
-            render_picture()
+            renderer.submit(frame)
             timings.append(frame.received_at)
             while len(timings) > 2 and timings[0] < frame.received_at - 3:
                 timings.popleft()
@@ -392,15 +398,29 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         if state['thread'] and not state['thread'].is_alive():
             start_button.config(state='normal')
             stop_button.config(state='disabled')
+        prepared = renderer.poll()
+        if prepared is not None and state['frame'] is not None:
+            if prepared.error:
+                status_text.set(prepared.error)
+            else:
+                # Tk object creation must remain on this thread.
+                state['photo'] = ImageTk.PhotoImage(prepared.image)
+                image_label.config(image=state['photo'], text='')
+        root.after(CAMERA_REFRESH_MS, update_camera)
+
+    def update_controls():
+        if state['closing']:
+            return
         motion.update()
         speech.update()
         mic_on = speech.controller.snapshot()['listening']
         mic_label.config(text='●  Mic on' if mic_on else 'Mic off', fg=MINT if mic_on else MUTED)
-        root.after(30, update)
+        root.after(CONTROL_REFRESH_MS, update_controls)
 
     def close():
         state['closing'] = True
         stop()
+        renderer.close()
         speech.close()
         assistant.close()
         motion.close()
@@ -416,7 +436,8 @@ def launch_viewer(address, channel, fps, rotation=180, mpu_port=None, motion_tra
         stop_button.config(state='disabled')
     else:
         start()
-    update()
+    update_camera()
+    update_controls()
     root.mainloop()
 
 

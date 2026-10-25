@@ -1,12 +1,12 @@
 # Synchro project handoff
 
-Snapshot: 25 October 2026, America/New_York. This document records the working
-project context rather than the entire chat. It excludes personal conversation,
+Updated: 25 October 2026, America/New_York. This document records the current
+Windows architecture and preserves historical hardware observations. It excludes personal conversation,
 credentials and private captured media. For current behavior and wiring, this
 handoff and MOTION.md take precedence over older bring-up notes in firmware/README.md.
 
-Latest addition: **Jarvis voice + vision assistant**, documented in
-firmware/JARVIS.md. After “Jarvis”, once the transcript ends in `.`, `?` or `!`, the app sends the
+The Windows app includes **Jarvis voice + vision assistant**, documented in
+[firmware/JARVIS.md](firmware/JARVIS.md). After “Jarvis”, once the transcript ends in `.`, `?` or `!`, the app sends the
 recognized request text and one fresh camera frame to Gemini 3.5 Flash-Lite,
 shows the answer and speaks it with Windows TTS. Its key is encrypted locally
 and excluded from Git/share packages. A receiving computer needs its own key.
@@ -16,8 +16,31 @@ so “type a generic search query and then press Enter” works as one request.
 The “Typing & keys” toggle controls execution; focus changes or input failures
 stop the remaining actions without retry. Typing uses paced individual characters
 to address reported repeats. All questions and answers share
-one in-memory conversation until New chat or app shutdown. The full test suite
-passes, and real Gemini writing plus a follow-up memory check passed.
+one in-memory conversation until New chat or app shutdown. Earlier live Gemini
+writing/memory observations are recorded below as historical evidence, not
+verification of every current Windows setup.
+
+## Current desktop state
+
+The `main` branch is the Windows implementation from hardware baseline `test`
+commit `721891c2278a04de3098fd94961e0acaa670fd8e`, with the native Tk UI redesigned.
+Camera is beside permanent Glove and Speech & Jarvis tabs. The UI uses a shared
+theme, themed scrollbars, grouped readouts, and a single preview banner. Jarvis,
+RNNoise, microphone selection, pointer controls, photo saving, and both transcript
+views are retained. `--pause-pointer` selects Speech & Jarvis without hiding Glove.
+
+Mac is a development host only: `tools/bluetooth_viewer.py --preview` uses the
+actual widgets but opens no hardware, audio, cloud, playback, or typing actions.
+The standalone Mac app and React/FastAPI layers are removed. The authenticated
+loopback endpoint in MotionSensor remains for local calibration/pointer tools;
+it is not the removed FastAPI server and is not a browser interface.
+
+Last observed software run for the polished UI: 143 tests run, 10 skipped, no
+failures on the Mac development host with `SYNCHRO_TEST_DESKTOP=1`. Desktop
+layout/control checks covered 980×720 and 1280×860, both tabs, and Jarvis/noise
+control callbacks with test doubles. This is a dated observation, not a fixed
+expected test count. Windows native checks, real radios, live microphone/Jarvis,
+and a clean-machine install were not revalidated by that UI test run.
 
 ## Purpose and design choices
 
@@ -127,10 +150,11 @@ The earlier native Mac camera prototype has been removed. Use --preview on the W
   **jarvis_assistant.py** owns wake requests, fresh snapshots, Gemini and TTS.
 
 Speech displays recognized text in the viewer; Jarvis also displays/speaks its
-answer. Explicit write/type/draft/compose requests insert generated writing into
-the focused editable field, using tools/text_writer.py. “Write exactly” inserts
-the recognized payload without an LLM rewrite. Current-field checks prevent typing
-after switching focus; New chat clears the shared conversation. See JARVIS.md.
+answer. Explicit writing and key requests run Gemini's validated action plan in
+the focused editable field, using tools/text_writer.py. Exact dictation goes to
+Gemini as well. Current-field checks prevent later actions after switching focus;
+New chat clears the shared conversation. See
+[firmware/JARVIS.md](firmware/JARVIS.md).
 A glove-mounted microphone is still a future hardware choice; none is installed.
 
 ## Current cursor design and limitations
@@ -183,7 +207,7 @@ The standalone CLI --address option works without this config.
 
 ## Calibration on the receiving computer
 
-Calibration is on the laptop, not in Nano flash, and this archive excludes the
+Calibration is on the laptop, not in Nano flash, and source packages exclude the
 owner's device-specific profile. With the glove connected, wait at least 10
 seconds for warm-up, rest the MPU completely still, and click
 **Calibrate — hold still 15 s**. Do not start until someone can leave it still.
@@ -242,7 +266,12 @@ for current camera firmware explicitly use **-Sketch SynchroCamBluetooth** and
 the detected COM port. Read the script and firmware/README.md before flashing.
 The current working hardware does not need reflashing merely to use another PC.
 
-## Verification and open issues
+## Historical verification and open issues
+
+The following observations were imported from the hardware branch's original
+Windows laptop. They predate the redesigned UI and have not been rerun as part
+of the documentation update. Evidence paths are private/local and not included
+in Git or source packages. Earlier test totals describe those revisions.
 
 Observed on the owner's Windows laptop:
 
@@ -256,7 +285,7 @@ Observed on the owner's Windows laptop:
 - Current tilt positioning, held-button dragging, two-finger scrolling, release
   positioning and Esc behavior pass simulated regressions. The earlier sideways
   translation/auto-activation experiment is no longer used by the pointer.
-- The current automated suite passed **140 tests** before the GitHub update.
+- The then-current automated suite passed **140 tests** before the hardware-branch GitHub update.
 - Real local Parakeet + Silero recognized a synthetic two-sentence fixture;
   decode times were 0.112 and 0.106 s after pause detection.
 - The subsequent live laptop microphone session reached **34 successful
@@ -275,14 +304,22 @@ Observed on the owner's Windows laptop:
 - Battery runtime, simultaneous load margin, final wearable mounting, long-term
   drift and physical pointing consistency have not been fully characterized.
 
-Useful next steps: test the friend's mic setup; transfer one Bluetooth connection
-at a time; calibrate on that computer; set a comfortable neutral pose and tune
-tilt sensitivity / axis reversal; then choose a glove microphone and test writing
-in the friend's target app.
+Next acceptance task: on a clean Windows computer, install requirements and
+run the app without --preview. Check fonts/DPI, both permanent tabs, camera
+start/stop/photo saving, USB/BLE connect and recovery, warmup/calibration,
+neutral position, dragging/scrolling/pause, microphone selection/RNNoise,
+Jarvis replies/read-aloud/cancellation, and explicit writing into a selected
+test field. Record live results separately from automated fixtures.
+
+Dwell click, drag lock, personal movement-range calibration, saved profiles,
+communication boards, extra camera controls and a packaged installer have been
+discussed but are not implemented. Gesture recognition remains out of scope.
+Wearable comfort and accessibility need evaluation with intended users.
 
 ## File and history notes
 
-The archive includes all authored source, tests and hardware diagrams.
+Source packages contain the current Windows source, tests and hardware diagrams;
+they do not include installed dependencies, private evidence or deleted app variants.
 NanoMotionTest is the early sensor diagnostic, NanoCamBridge the temporary
 camera programmer, SynchroCam the historical Wi-Fi/AP camera viewer, and
 SynchroCamBluetooth the current camera firmware.

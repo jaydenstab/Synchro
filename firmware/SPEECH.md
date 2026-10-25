@@ -1,22 +1,27 @@
 # Local speech in the camera viewer
 
+Run commands from the project root unless a section says otherwise.
+
 The viewer continuously reads the selected laptop microphone, uses **Silero VAD**
 to detect a pause, then transcribes that utterance with **Parakeet TDT 0.6B v2**.
-Text appears in the speech panel after each pause. This is English transcription
-on this laptop, independent of the glove and camera Bluetooth connections.
+Text appears in the **Live transcript** view under **Speech & Jarvis** after
+each pause. Transcription is English and runs locally on the Windows computer,
+independent of the glove and camera connections. Mac `--preview` does not open
+the microphone or run inference.
 
 The viewer also supports [Jarvis](JARVIS.md): after the wake word, terminating
 punctuation (`.`, `?`, `!`) sends the collected transcript and current camera image to Gemini and
-plays its response. The 512 ms boundaries below are local transcription chunks;
+plays its response when Read aloud is enabled. The 512 ms boundaries below are local transcription chunks;
 they do not independently trigger cloud requests.
 
 Click **Start mic** to listen or **Stop mic** to release the microphone. A visible
 **MIC ON** indicator, input selector and level meter show what is active.
 **Noise suppression** is enabled by default and runs RNNoise locally before
 both Silero and Parakeet. The status shows **RNNoise on** only once the filter
-has loaded. Stop the mic to change the input or toggle suppression. For AirPods,
-select **Headset (Justin’s AirPods Pro) · Windows WASAPI** when connected, then
-click **Start mic**. The selection applies to the current viewer session.
+has loaded. Stop the mic to change the input or toggle suppression. Select your
+headset or microphone from the available MME/Windows WASAPI inputs, then click
+**Start mic**. Device names depend on the receiving computer. Selection applies
+to this viewer session; it is not a saved user profile.
 
 RNNoise reduces background noise; it does not isolate one speaker from other
 people speaking. Its native library is supplied by the pinned `pyrnnoise`
@@ -30,8 +35,8 @@ unchecked to use the unfiltered input.
 
 **Clear text** clears the transcript and discards older queued/in-flight results.
 Closing the viewer stops capture. **Pause pointer** pauses the glove pointer;
-Esc does not stop the pointer or microphone. A normal launch starts with the mic off; use `-Listen` to
-start listening immediately:
+Esc does not stop the pointer or microphone. A normal launch starts with the
+mic off; use `-Listen` to start listening immediately:
 
 ```powershell
 ./tools/Start-Bluetooth-Camera.ps1 -Listen
@@ -39,8 +44,8 @@ start listening immediately:
 
 Install with the same Python runtime used by the launcher:
 
-```text
-python -m pip install -r tools/requirements-speech.txt
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 The CPU runtime is ONNX Runtime, using the INT8 ONNX conversion of NVIDIA's
@@ -51,12 +56,16 @@ the laptop's AMD hardware without requiring CUDA or PyTorch.
 Model downloads happen once (about 664 MB total) into the Hugging Face cache.
 Subsequent loads read the cache first, including when offline. Both model
 revisions are pinned in `tools/speech_models.py`. The application does not read
-the old Groq API key or call Groq. Audio and transcripts stay in memory on the
-laptop; the transcription box holds up to 16,000 characters. When Jarvis is
+the old Groq API key or call Groq. The app keeps audio and transcripts in memory
+rather than saving them to disk; the transcription box holds up to 16,000
+characters. When Jarvis is
 enabled, the activated request text, previous conversation text and a fresh camera
-JPEG are also sent to Gemini. Explicit writing requests can insert the response
-into the selected text box; “write exactly” uses the recognized text locally.
-See JARVIS.md for its separate encrypted key and transmission controls.
+JPEG are also sent to Gemini. Explicit writing and key requests can run Gemini's
+validated action plan in the selected text box. Exact dictation goes to Gemini
+too, and that text can be sent again as later conversation context. Uncheck
+Listen for Jarvis for local transcription only.
+New chat clears existing assistant history. See [JARVIS.md](JARVIS.md) for its
+separate encrypted key and transmission controls.
 
 ## Pause detection
 
@@ -79,7 +88,13 @@ See JARVIS.md for its separate encrypted key and transmission controls.
 The glove-mounted microphone is not implemented yet. A microphone exposed as a
 computer audio input can be selected from the input dropdown later.
 
-## Verification
+## Verification and limitations
+
+The timing and recognition observations below are historical measurements from
+the hardware branch's original laptop, using synthetic audio fixtures. They have
+not been repeated as live microphone tests for the redesigned Windows UI. Native
+RNNoise/library checks may be skipped when dependencies are unavailable; report
+those separately from passing tests. See the root README for current test commands.
 
 The real Silero + Parakeet pipeline recognized the synthetic test phrase
 “Testing the Synchro glove microphone. Speech appears in the camera viewer.”

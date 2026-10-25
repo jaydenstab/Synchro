@@ -14,6 +14,11 @@ MINT = '#3ddc97'
 INK = '#06281a'
 WARN = '#f0b429'
 DANGER = '#ff6b6b'
+CHIP = '#25353a'
+SELECT = '#285d46'
+SELECT_TEXT = '#d2ffe3'
+BANNER = '#1b2822'
+BANNER_TEXT = '#b7cbbc'
 FONT = 'Segoe UI' if sys.platform == 'win32' else 'Helvetica Neue'
 
 
@@ -22,7 +27,7 @@ def install_theme(root):
     root.option_add('*Font', (FONT, 10))
     root.option_add('*TCombobox*Listbox.background', INSET)
     root.option_add('*TCombobox*Listbox.foreground', TEXT)
-    root.option_add('*TCombobox*Listbox.selectBackground', '#285d46')
+    root.option_add('*TCombobox*Listbox.selectBackground', SELECT)
     root.option_add('*TCombobox*Listbox.selectForeground', TEXT)
     style = ttk.Style(root)
     style.theme_use('clam')
@@ -131,7 +136,7 @@ class TextPane(tk.Frame):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
         self.text = tk.Text(self, width=32, height=5, wrap='word', font=(FONT, 11), bg=INSET,
-                            fg=TEXT, insertbackground=TEXT, selectbackground='#285d46',
+                            fg=TEXT, insertbackground=TEXT, selectbackground=SELECT,
                             selectforeground=TEXT, relief='flat', borderwidth=0, highlightthickness=0,
                             state='disabled', padx=12, pady=12)
         self.text.grid(row=0, column=0, sticky='nsew')
