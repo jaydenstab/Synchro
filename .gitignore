@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+.pytest_cache/
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+data/*.jsonl
+data/*.sqlite3
+models/*.joblib
+.DS_Store
+
+# Local Bluetooth pairing PIN for the ESP32-CAM. Do not commit.
+PAIRING.txt
+camera/**/*.app/

@@ -1,0 +1,13 @@
+Unmodified teammate drop, copied before any camera-viewer changes.
+
+Included, byte-for-byte:
+- SynchroCamera.swift
+- Start-Mac.command
+- Info.plist
+- README.md
+
+PAIRING.txt is not in this checkpoint. It contains the Bluetooth pairing PIN.
+The working copy is camera/synchro_mac/PAIRING.txt and is listed in .gitignore.
+
+Build this folder with its own Start-Mac.command to recover the original viewer.
+Only one viewer may hold the camera's RFCOMM channel at a time.

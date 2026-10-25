@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionGlove Studio</title>
+<style>
+:root{
+  --bg:#08111f;--panel:#121c2e;--panel-2:#0c1626;--line:#2a3b58;--text:#eef3ff;--muted:#93a4c0;
+  --accent:#5b8cff;--ok:#34d399;--warn:#fbbf24;--bad:#fb7185;--chip:#3a2718;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);background:var(--bg);
+}
+*{box-sizing:border-box}body{margin:0}
+button,input,select{font:inherit}
+.app{max-width:1180px;margin:0 auto;padding:22px 16px 48px}
+header.top{display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;align-items:flex-start;margin-bottom:18px}
+h1{margin:0;font-size:28px;letter-spacing:-.03em}
+.sub{margin:6px 0 0;color:var(--muted);line-height:1.5}
+.pills{display:flex;flex-wrap:wrap;gap:8px}
+.chip,.status-pill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:700;border:1px solid transparent}
+.chip.warn{background:var(--chip);color:#f3c7a0;border-color:#7a5338}
+.status-pill{background:#102033;border-color:var(--line);color:var(--muted)}
+.status-pill.on{color:var(--ok);border-color:#1f6b4f}
+.status-pill.off{color:var(--bad);border-color:#7a3142}
+.nav{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.nav button{background:#152238;color:var(--muted);border:1px solid var(--line);border-radius:11px;padding:9px 13px;cursor:pointer;font-weight:700}
+.nav button[aria-current="page"]{background:var(--accent);color:#fff;border-color:transparent}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px}
+h2{margin:0 0 8px;font-size:18px}h3{margin:0 0 8px;font-size:14px;color:var(--muted);font-weight:700}
+p{color:var(--muted);line-height:1.55;margin:0 0 12px}
+.grid-2{display:grid;grid-template-columns:1.4fr .8fr;gap:14px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.grid-6{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.readout{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:10px}
+.readout b{display:block;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.04em}
+.readout span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px}
+canvas.plot{width:100%;height:210px;background:#0b1424;border-radius:12px;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--muted);margin:8px 0 0}
+.swatch{display:inline-block;width:10px;height:10px;border-radius:99px;margin-right:5px}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
+input,select{width:100%;background:#0b1424;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+button.act{cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 13px;font-weight:700}
+button.alt{background:#223352;color:#fff;border:0;border-radius:10px;padding:10px 13px;font-weight:700;cursor:pointer}
+button.danger{background:#7f2740;color:#fff;border:0;border-radius:10px;padding:10px 13px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+.banner{border-radius:12px;padding:10px 12px;margin:8px 0;font-size:13px}
+.banner.ok{background:#113427;color:#b7f7d7}
+.banner.err{background:#3a1520;color:#ffc3ce}
+.banner.info{background:#152238;color:#c5d7f5}
+.list{display:grid;gap:10px}
+.item{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px}
+.item header{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+.meta{font-size:12px;color:var(--muted)}
+.recs{margin-top:10px;display:grid;gap:8px}
+.rec{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;background:#0b1424;border-radius:10px;padding:8px 10px}
+.toast{position:fixed;right:16px;bottom:16px;max-width:360px;z-index:20}
+.hidden{display:none}
+.metric{font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.6;color:#d7f5dd;white-space:pre-wrap}
+.bar{height:8px;background:#1b2a42;border-radius:99px;overflow:hidden}
+.bar > i{display:block;height:100%;background:var(--accent);width:0}
+.dist{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin:6px 0}
+.unknown{color:var(--warn);font-weight:800}
+footer{color:var(--muted);font-size:12px;margin-top:8px}
+@media(max-width:900px){.grid-2,.grid-6,.grid-3{grid-template-columns:1fr 1fr} .grid-6{grid-template-columns:1fr 1fr 1fr}}
+@media(max-width:640px){.grid-2,.grid-6,.grid-3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div>
+      <h1>VisionGlove Studio</h1>
+      <p class="sub">Personalized six-axis gesture training. Hardware is not connected.</p>
+    </div>
+    <div class="pills">
+      <span class="chip warn" id="sourceChip">SIMULATED SENSOR DATA</span>
+      <span class="status-pill off" id="connPill">Disconnected</span>
+    </div>
+  </header>
+  <nav class="nav" aria-label="Studio sections">
+    <button type="button" data-tab="live" aria-current="page">Live Sensor</button>
+    <button type="button" data-tab="record">Recorder</button>
+    <button type="button" data-tab="library">Library</button>
+    <button type="button" data-tab="train">Train</button>
+    <button type="button" data-tab="test">Test</button>
+  </nav>
+
+  <section id="live" class="tab">
+    <div class="card">
+      <h2>Live sensor dashboard</h2>
+      <p>WebSocket feed from the on-device simulator. Values are not MPU6050 measurements.</p>
+      <div class="grid-6" id="axisReadouts"></div>
+      <div class="row">
+        <div class="readout"><b>INPUT SOURCE</b><span id="liveSource">—</span></div>
+        <div class="readout"><b>SIMULATED MOTION</b><span id="liveMotion">—</span></div>
+        <div class="readout"><b>SAMPLE RATE</b><span id="liveHz">—</span></div>
+        <div class="readout"><b>LAST t_ms</b><span id="liveT">—</span></div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h2>Accelerometer (m/s²)</h2>
+        <canvas class="plot" id="accelPlot" width="720" height="210" aria-label="Accelerometer graph"></canvas>
+        <div class="legend"><span><i class="swatch" style="background:#5b8cff"></i>ax</span><span><i class="swatch" style="background:#34d399"></i>ay</span><span><i class="swatch" style="background:#fbbf24"></i>az</span></div>
+      </div>
+      <div class="card">
+        <h2>Gyroscope (rad/s)</h2>
+        <canvas class="plot" id="gyroPlot" width="720" height="210" aria-label="Gyroscope graph"></canvas>
+        <div class="legend"><span><i class="swatch" style="background:#818cf8"></i>gx</span><span><i class="swatch" style="background:#22d3ee"></i>gy</span><span><i class="swatch" style="background:#fb7185"></i>gz</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="record" class="tab hidden">
+    <div class="card">
+      <h2>Custom gesture recorder</h2>
+      <p>Start/Stop captures the live synthetic stream for the selected gesture. Stop saves that interval; Discard cancels without saving. DTW needs at least two examples per class.</p>
+      <div class="grid-2">
+        <div>
+          <label for="newGesture">New gesture name</label>
+          <input id="newGesture" maxlength="40" placeholder="e.g. flick_right">
+          <div class="row">
+            <button type="button" class="act" id="createGesture">Create gesture</button>
+          </div>
+          <label for="gestureSelect">Record into</label>
+          <select id="gestureSelect"></select>
+          <div class="row">
+            <button type="button" class="act" id="startRec">Start recording</button>
+            <button type="button" class="alt" id="stopRec" disabled>Stop &amp; save</button>
+            <button type="button" class="danger" id="cancelRec" disabled>Discard</button>
+          </div>
+          <div id="recMsg" class="banner info">Idle. Choose a gesture, then start.</div>
+          <div class="row">
+            <div class="readout"><b>TIMER</b><span id="recTimer">0.0s</span></div>
+            <div class="readout"><b>SAMPLES</b><span id="recCount">0</span></div>
+            <div class="readout"><b>MINIMUM</b><span>8 samples</span></div>
+          </div>
+        </div>
+        <div>
+          <h3>Optional batch generator</h3>
+          <p>Creates labeled synthetic examples without using the live recorder. Still marked synthetic.</p>
+          <label for="genMotion">Simulated motion pattern</label>
+          <select id="genMotion">
+            <option value="flick_right">flick_right</option>
+            <option value="flick_left">flick_left</option>
+            <option value="double_twist">double_twist</option>
+            <option value="circle">circle</option>
+          </select>
+          <div class="row"><button type="button" class="alt" id="genBatch">Generate 10 synthetic examples</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="library" class="tab hidden">
+    <div class="card">
+      <h2>Gesture library</h2>
+      <p>All rows are loaded from SQLite. Replay draws a saved sequence on the live graphs without changing stored data.</p>
+      <div id="libraryList" class="list"></div>
+    </div>
+  </section>
+
+  <section id="train" class="tab hidden">
+    <div class="card">
+      <h2>Model training</h2>
+      <p>Trains the existing multivariate DTW templates. Distances are not probabilities or confidence percentages. A class is included only if it has at least two non-idle recordings.</p>
+      <div id="trainNeed" class="banner info"></div>
+      <div class="row">
+        <button type="button" class="act" id="trainBtn">Train DTW model</button>
+      </div>
+      <div class="grid-3" id="trainStats"></div>
+      <pre class="metric" id="trainDetail">No training result yet.</pre>
+    </div>
+  </section>
+
+  <section id="test" class="tab hidden">
+    <div class="card">
+      <h2>Gesture testing</h2>
+      <p>Run a fresh simulated motion or classify a saved recording. Rejected inputs display as Unknown Gesture.</p>
+      <div class="grid-2">
+        <div>
+          <h3>New simulated trial</h3>
+          <label for="testMotion">Motion</label>
+          <select id="testMotion">
+            <option>flick_right</option><option>flick_left</option><option>double_twist</option>
+            <option>circle</option><option>idle</option><option>unknown</option>
+          </select>
+          <div class="row"><button type="button" class="act" id="testSim">Test simulated motion</button></div>
+        </div>
+        <div>
+          <h3>Saved recording</h3>
+          <label for="testRecording">Recording</label>
+          <select id="testRecording"></select>
+          <div class="row"><button type="button" class="alt" id="testSaved">Test saved recording</button></div>
+        </div>
+      </div>
+      <div id="predBox" class="banner info">No prediction yet.</div>
+      <div id="predDistances"></div>
+    </div>
+  </section>
+  <footer>Synthetic streams validate the software pipeline. They do not measure real-world glove accuracy. DTW distance is a raw match score, not calibrated confidence.</footer>
+</div>
+<div class="toast" id="toast" aria-live="polite"></div>
+<script>
+const $ = id => document.getElementById(id);
+const AX = ['ax','ay','az','gx','gy','gz'];
+const ACCEL = ['ax','ay','az'];
+const GYRO = ['gx','gy','gz'];
+const COLORS = {ax:'#5b8cff',ay:'#34d399',az:'#fbbf24',gx:'#818cf8',gy:'#22d3ee',gz:'#fb7185'};
+const state = {
+  tab: 'live', status: null, gestures: [], recordings: [],
+  lastSample: null, source: 'synthetic', motion: '—', connected: false,
+  hz: 0, stamps: [], buf: [], replay: null,
+  recording: false, recStarted: 0, recTimer: null, dirty: false, lastTrainRecordings: null
+};
+
+function toast(msg, kind='info'){
+  const el = $('toast');
+  el.innerHTML = `<div class="banner ${kind}">${escapeHtml(msg)}</div>`;
+  setTimeout(()=>{ if(el.textContent.includes(msg)) el.innerHTML=''; }, 5000);
+}
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmt(n, d=3){ return Number.isFinite(n) ? Number(n).toFixed(d) : '—'; }
+function errText(e){ return e && e.message ? e.message : String(e); }
+
+async function request(url, options={}){
+  const r = await fetch(url, options);
+  const text = await r.text();
+  let obj = null;
+  try { obj = text ? JSON.parse(text) : null; } catch { obj = {detail: text}; }
+  if (!r.ok){
+    const detail = obj && obj.detail;
+    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || obj || r.status));
+  }
+  return obj;
+}
+const post = (url, body) => request(url, {method:'POST', headers:{'content-type':'application/json'}, ...(body!==undefined?{body:JSON.stringify(body)}:{})});
+const patch = (url, body) => request(url, {method:'PATCH', headers:{'content-type':'application/json'}, body: JSON.stringify(body)});
+const del = url => request(url, {method:'DELETE'});
+
+function setTab(name){
+  state.tab = name;
+  document.querySelectorAll('.tab').forEach(el => el.classList.toggle('hidden', el.id !== name));
+  document.querySelectorAll('.nav button').forEach(btn => {
+    if (btn.dataset.tab === name) btn.setAttribute('aria-current', 'page');
+    else btn.removeAttribute('aria-current');
+  });
+}
+
+$('axisReadouts').innerHTML = AX.map(k => `<div class="readout"><b>${k.toUpperCase()}</b><span id="v-${k}">—</span></div>`).join('');
+
+function drawChart(canvas, keys, scale){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle = '#24344d';
+  for(let y=20;y<h;y+=38){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+  const data = state.buf;
+  keys.forEach(k => {
+    ctx.strokeStyle = COLORS[k]; ctx.lineWidth = 2; ctx.beginPath();
+    data.forEach((s,i) => {
+      const x = data.length < 2 ? 0 : i * w / (150-1);
+      const y = h/2 - (s[k] || 0) * scale;
+      i ? ctx.lineTo(x,y) : ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+  });
+}
+function draw(){
+  drawChart($('accelPlot'), ACCEL, 8);
+  drawChart($('gyroPlot'), GYRO, 28);
+}
+function pushSample(sample){
+  state.buf.push(sample);
+  if (state.buf.length > 150) state.buf.shift();
+  state.lastSample = sample;
+  AX.forEach(k => { const el = $('v-'+k); if (el) el.textContent = fmt(sample[k], 3); });
+  $('liveT').textContent = fmt(sample.t_ms, 2);
+  draw();
+}
+
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/telemetry`);
+  $('connPill').textContent = 'Connecting…';
+  ws.onopen = () => { state.connected = true; $('connPill').textContent = 'Connected'; $('connPill').className = 'status-pill on'; };
+  ws.onclose = () => { state.connected = false; $('connPill').textContent = 'Disconnected'; $('connPill').className = 'status-pill off'; setTimeout(connect, 1500); };
+  ws.onerror = () => { state.connected = false; };
+  ws.onmessage = ev => {
+    const msg = JSON.parse(ev.data);
+    const now = performance.now();
+    state.stamps.push(now);
+    if (state.stamps.length > 40) state.stamps.shift();
+    if (state.stamps.length >= 2){
+      const dt = (state.stamps.at(-1) - state.stamps[0]) / (state.stamps.length-1);
+      state.hz = dt > 0 ? 1000/dt : 0;
+      $('liveHz').textContent = `${state.hz.toFixed(0)} Hz`;
+    }
+    state.source = msg.source || 'synthetic';
+    state.motion = msg.motion || '—';
+    $('liveSource').textContent = state.source;
+    $('liveMotion').textContent = state.motion;
+    $('sourceChip').textContent = state.source === 'synthetic' ? 'SIMULATED SENSOR DATA' : String(state.source).toUpperCase();
+    if (!state.replay && msg.sample) pushSample(msg.sample);
+  };
+}
+
+async function refresh(){
+  const [status, gestures, recordings] = await Promise.all([
+    request('/api/status'),
+    request('/api/gestures'),
+    request('/api/recordings')
+  ]);
+  state.status = status;
+  state.gestures = gestures.gestures || [];
+  state.recordings = recordings.recordings || [];
+  if (state.lastTrainRecordings != null && status.recordings !== state.lastTrainRecordings) state.dirty = true;
+  renderSelects();
+  renderLibrary();
+  renderTrain();
+  renderTestRecordings();
+}
+
+function renderSelects(){
+  const sel = $('gestureSelect');
+  const current = sel.value;
+  sel.innerHTML = state.gestures.map(g => `<option value="${g.id}">${escapeHtml(g.name)} (${g.recording_count})</option>`).join('') || '<option value="">No gestures yet</option>';
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+}
+
+function renderLibrary(){
+  const host = $('libraryList');
+  if (!state.gestures.length){ host.innerHTML = '<div class="banner info">No gestures saved yet.</div>'; return; }
+  host.innerHTML = state.gestures.map(g => {
+    const recs = state.recordings.filter(r => r.gesture_id === g.id);
+    const last = recs.map(r => r.created_at).sort().at(-1) || '—';
+    const sources = [...new Set(recs.map(r => r.source))].join(', ') || '—';
+    const rows = recs.map(r => `
+      <div class="rec">
+        <div class="meta">${escapeHtml(r.id.slice(0,8))} · ${r.sample_count} samples · ${fmt(r.duration_ms,1)} ms · ${escapeHtml(r.source)} · ${escapeHtml(r.created_at)}</div>
+        <div class="row">
+          <button type="button" class="alt" data-replay="${r.id}">Replay</button>
+          <button type="button" class="alt" data-preview="${r.id}">Preview JSON</button>
+          <button type="button" class="danger" data-delrec="${r.id}">Delete recording</button>
+        </div>
+      </div>`).join('') || '<div class="meta">No recordings yet.</div>';
+    return `<article class="item" data-gid="${g.id}">
+      <header>
+        <div>
+          <strong>${escapeHtml(g.name)}</strong>
+          <div class="meta">${g.recording_count} examples · source ${escapeHtml(sources)} · last ${escapeHtml(last)}</div>
+        </div>
+        <div class="row">
+          <button type="button" class="alt" data-rename="${g.id}">Rename</button>
+          <button type="button" class="danger" data-delg="${g.id}" data-name="${escapeHtml(g.name)}">Delete gesture</button>
+        </div>
+      </header>
+      <div class="recs">${rows}</div>
+    </article>`;
+  }).join('');
+}
+
+function renderTrain(){
+  const counts = {};
+  state.recordings.forEach(r => { counts[r.label] = (counts[r.label]||0)+1; });
+  const ready = Object.entries(counts).filter(([label,n]) => label !== 'idle' && n >= 2).map(([l])=>l);
+  const short = Object.entries(counts).filter(([label,n]) => label !== 'idle' && n < 2);
+  const trained = (state.status && state.status.trained) || [];
+  $('trainNeed').className = 'banner ' + (state.dirty ? 'err' : 'info');
+  $('trainNeed').textContent = state.dirty
+    ? 'Recordings changed since the last train. Retrain before relying on predictions.'
+    : (ready.length ? `Eligible classes (≥2 examples): ${ready.join(', ')}` : 'Need at least two recordings for a gesture class before DTW can train it.');
+  if (short.length) $('trainNeed').textContent += ` Not yet eligible: ${short.map(([l,n])=>`${l} (${n})`).join(', ')}.`;
+  $('trainStats').innerHTML = `
+    <div class="readout"><b>GESTURE CLASSES</b><span>${state.gestures.length}</span></div>
+    <div class="readout"><b>RECORDINGS</b><span>${state.recordings.length}</span></div>
+    <div class="readout"><b>TRAINED NAMES</b><span>${trained.length ? trained.join(', ') : 'none'}</span></div>`;
+}
+
+function renderTestRecordings(){
+  const sel = $('testRecording');
+  const cur = sel.value;
+  sel.innerHTML = state.recordings.map(r => `<option value="${r.id}">${escapeHtml(r.label)} · ${r.sample_count} samp · ${escapeHtml(r.source)}</option>`).join('') || '<option value="">None</option>';
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+}
+
+function showPrediction(result){
+  const unknown = result.label === 'unknown' || result.match === false;
+  $('predBox').className = 'banner ' + (unknown ? 'err' : 'ok');
+  $('predBox').innerHTML = unknown
+    ? `<strong class="unknown">Unknown Gesture</strong><div>Closest class ${escapeHtml(result.closest_class)} · DTW distance ${result.distance} · threshold ${result.threshold} · rejected</div>`
+    : `<strong>Predicted: ${escapeHtml(result.label)}</strong><div>Closest class ${escapeHtml(result.closest_class)} · DTW distance ${result.distance} · threshold ${result.threshold} · accepted</div>`;
+  const note = result.note ? `<div class="meta">${escapeHtml(result.note)}</div>` : '';
+  const dists = result.distances || {};
+  const max = Math.max(0.001, ...Object.values(dists), result.threshold || 0);
+  $('predDistances').innerHTML = note + Object.entries(dists).map(([k,v]) => {
+    const pct = Math.min(100, (v/max)*100);
+    return `<div class="dist"><span>${escapeHtml(k)}</span><span>distance ${v}${k===result.closest_class?' · closest':''}</span></div><div class="bar"><i style="width:${pct}%"></i></div>`;
+  }).join('');
+}
+
+async function replayRecording(id){
+  const rec = await request(`/api/recordings/${id}`);
+  if (!rec.samples || rec.samples.length < 2) throw new Error('Recording has too few samples to replay.');
+  state.replay = rec.samples;
+  state.buf = [];
+  setTab('live');
+  toast(`Replaying ${rec.label} (${rec.samples.length} samples)`, 'ok');
+  let i = 0;
+  const tick = () => {
+    if (!state.replay) return;
+    pushSample(state.replay[i]);
+    i += 1;
+    if (i >= state.replay.length){ state.replay = null; toast('Replay finished. Live feed resumed.', 'info'); return; }
+    setTimeout(tick, 20);
+  };
+  tick();
+}
+
+function startRecTimer(){
+  state.recStarted = performance.now();
+  clearInterval(state.recTimer);
+  state.recTimer = setInterval(async () => {
+    $('recTimer').textContent = ((performance.now() - state.recStarted)/1000).toFixed(1) + 's';
+    try {
+      const s = await request('/api/status');
+      const active = s.active_recording;
+      $('recCount').textContent = active ? active.sample_count : '0';
+      if (!active && state.recording){
+        state.recording = false;
+        setRecButtons(false);
+        $('recMsg').textContent = 'Recording ended on the server.';
+      }
+    } catch {}
+  }, 250);
+}
+function setRecButtons(on){
+  $('startRec').disabled = on;
+  $('stopRec').disabled = !on;
+  $('cancelRec').disabled = !on;
+}
+
+document.querySelector('.nav').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-tab]');
+  if (btn) setTab(btn.dataset.tab);
+});
+
+$('createGesture').onclick = async () => {
+  try {
+    const name = $('newGesture').value.trim();
+    if (!name) throw new Error('Enter a gesture name.');
+    const g = await post('/api/gestures', {name});
+    $('newGesture').value = '';
+    await refresh();
+    $('gestureSelect').value = g.id;
+    $('recMsg').className = 'banner ok';
+    $('recMsg').textContent = `Created gesture ${g.name}.`;
+    toast(`Created ${g.name}`, 'ok');
+  } catch (e) {
+    $('recMsg').className = 'banner err';
+    $('recMsg').textContent = errText(e);
+    toast(errText(e), 'err');
+  }
+};
+
+$('startRec').onclick = async () => {
+  try {
+    const gesture_id = $('gestureSelect').value;
+    if (!gesture_id) throw new Error('Create and select a gesture first.');
+    const started = await post('/api/recordings/start', {gesture_id, source: 'synthetic'});
+    state.recording = true;
+    setRecButtons(true);
+    startRecTimer();
+    $('recMsg').className = 'banner ok';
+    $('recMsg').textContent = `Recording ${started.label}. Capturing the live simulated stream.`;
+  } catch (e) {
+    $('recMsg').className = 'banner err';
+    $('recMsg').textContent = errText(e);
+    toast(errText(e), 'err');
+  }
+};
+
+$('stopRec').onclick = async () => {
+  try {
+    const saved = await post('/api/recordings/stop');
+    state.recording = false;
+    clearInterval(state.recTimer);
+    setRecButtons(false);
+    state.dirty = true;
+    await refresh();
+    $('recMsg').className = 'banner ok';
+    $('recMsg').textContent = `Saved ${saved.sample_count} samples (${fmt(saved.duration_ms,1)} ms) as ${saved.label}. Source: ${saved.source}.`;
+    toast('Recording saved', 'ok');
+  } catch (e) {
+    $('recMsg').className = 'banner err';
+    $('recMsg').textContent = errText(e);
+    toast(errText(e), 'err');
+  }
+};
+
+$('cancelRec').onclick = async () => {
+  try {
+    await post('/api/recordings/cancel');
+    state.recording = false;
+    clearInterval(state.recTimer);
+    setRecButtons(false);
+    $('recCount').textContent = '0';
+    $('recTimer').textContent = '0.0s';
+    $('recMsg').className = 'banner info';
+    $('recMsg').textContent = 'Discarded. Nothing was saved.';
+  } catch (e) {
+    toast(errText(e), 'err');
+  }
+};
+
+$('genBatch').onclick = async () => {
+  try {
+    const label = ($('gestureSelect').selectedOptions[0] || {}).textContent || $('newGesture').value.trim();
+    const name = (label || '').split(' (')[0] || $('newGesture').value.trim();
+    if (!name) throw new Error('Create or select a gesture first.');
+    const x = await post('/api/demo/generate', {label: name, motion: $('genMotion').value, examples: 10});
+    state.dirty = true;
+    await refresh();
+    $('recMsg').className = 'banner ok';
+    $('recMsg').textContent = `Generated ${x.saved} synthetic examples for ${x.label}. This is not a live capture.`;
+  } catch (e) {
+    $('recMsg').className = 'banner err';
+    $('recMsg').textContent = errText(e);
+  }
+};
+
+$('libraryList').addEventListener('click', async e => {
+  const t = e.target;
+  try {
+    if (t.dataset.replay) await replayRecording(t.dataset.replay);
+    if (t.dataset.preview){
+      const rec = await request(`/api/recordings/${t.dataset.preview}`);
+      alert(`${rec.label}\n${rec.sample_count} samples\nfirst t_ms=${rec.samples[0].t_ms}\nlast t_ms=${rec.samples.at(-1).t_ms}`);
+    }
+    if (t.dataset.delrec){
+      if (!confirm('Delete this recording? This cannot be undone in SQLite (JSONL archive is kept).')) return;
+      await del(`/api/recordings/${t.dataset.delrec}`);
+      state.dirty = true;
+      await refresh();
+      toast('Recording deleted', 'ok');
+    }
+    if (t.dataset.rename){
+      const name = prompt('New gesture name');
+      if (!name) return;
+      await patch(`/api/gestures/${t.dataset.rename}`, {name});
+      state.dirty = true;
+      await refresh();
+      toast('Gesture renamed', 'ok');
+    }
+    if (t.dataset.delg){
+      if (!confirm(`Delete gesture "${t.dataset.name}" and its SQLite recordings?`)) return;
+      await del(`/api/gestures/${t.dataset.delg}`);
+      state.dirty = true;
+      await refresh();
+      toast('Gesture deleted', 'ok');
+    }
+  } catch (err) {
+    toast(errText(err), 'err');
+  }
+});
+
+$('trainBtn').onclick = async () => {
+  try {
+    $('trainDetail').textContent = 'Training…';
+    const result = await post('/api/train');
+    state.dirty = false;
+    state.lastTrainRecordings = result.recordings;
+    await refresh();
+    const th = result.thresholds || {};
+    $('trainDetail').textContent =
+      `trained_classes: ${JSON.stringify(result.trained_classes)}\n` +
+      `recordings: ${result.recordings}\n` +
+      `thresholds (DTW distance, not confidence):\n` +
+      Object.entries(th).map(([k,v]) => `  ${k}: ${Number(v).toFixed(4)}`).join('\n');
+    if (!(result.trained_classes || []).length){
+      $('trainNeed').className = 'banner err';
+      $('trainNeed').textContent = 'Training ran, but no class had at least two recordings. Add another example, then train again.';
+    }
+    toast('Training finished', 'ok');
+  } catch (e) {
+    $('trainDetail').textContent = errText(e);
+    toast(errText(e), 'err');
+  }
+};
+
+$('testSim').onclick = async () => {
+  try {
+    const motion = $('testMotion').value;
+    showPrediction(await post(`/api/demo/predict/${motion}`));
+  } catch (e) { $('predBox').className='banner err'; $('predBox').textContent = errText(e); }
+};
+$('testSaved').onclick = async () => {
+  try {
+    const id = $('testRecording').value;
+    if (!id) throw new Error('No saved recording selected.');
+    const rec = await request(`/api/recordings/${id}`);
+    showPrediction(await post('/api/predict', {samples: rec.samples}));
+  } catch (e) { $('predBox').className='banner err'; $('predBox').textContent = errText(e); }
+};
+
+connect();
+refresh().catch(e => toast(errText(e), 'err'));
+</script>
+</body>
+</html>
